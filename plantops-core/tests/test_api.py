@@ -46,6 +46,11 @@ class ApiTests(unittest.TestCase):
         self.assertIn("finished_goods_total", payload["summary"])
         self.assertIn("backlog_units", payload["summary"]["order_summary"])
         self.assertIn("backlog_orders", payload["summary"]["order_summary"])
+        self.assertIn("supply_summary", payload["summary"])
+        self.assertEqual(
+            payload["summary"]["raw_material_remaining"],
+            payload["summary"]["supply_summary"]["raw_material_on_hand"],
+        )
 
     def test_same_request_returns_same_event_digest(self):
         request = {"seed": 42, "minutes": 480, "failures_enabled": True}
@@ -100,6 +105,11 @@ class ApiTests(unittest.TestCase):
         self.assertIn("order_summary", session["summary"])
         self.assertIn("finished_goods_available", session["summary"])
         self.assertIn("backlog_units", session["summary"]["order_summary"])
+        self.assertIn("supply_summary", session["summary"])
+        self.assertEqual(
+            session["summary"]["raw_material_remaining"],
+            session["summary"]["supply_summary"]["raw_material_on_hand"],
+        )
         self.assertNotIn("simulation", session)
 
     def test_advance_changes_time_without_replacing_session(self):
@@ -368,6 +378,69 @@ class ApiTests(unittest.TestCase):
             with self.subTest(payload=payload):
                 response = self.client.post(
                     f"/sessions/{session_id}/actions/prioritize-order",
+                    json=payload,
+                )
+                self.assertEqual(response.status_code, 422)
+
+    def test_paused_session_can_place_purchase_order_without_intervention_cost(self):
+        session = self.create_session()
+        session_id = session["session_id"]
+        raw_before = session["summary"]["raw_material_remaining"]
+        self.client.post(f"/sessions/{session_id}/pause")
+
+        response = self.client.post(
+            f"/sessions/{session_id}/actions/place-purchase-order",
+            json={"supplier_id": "STEEL-01", "quantity": 100},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        updated = response.json()
+        supply = updated["summary"]["supply_summary"]
+        self.assertTrue(updated["paused"])
+        self.assertEqual(updated["intervention_cost"], 0.0)
+        self.assertEqual(updated["summary"]["raw_material_remaining"], raw_before)
+        self.assertEqual(supply["purchase_orders_total"], 1)
+        self.assertEqual(supply["purchase_orders_open"], 1)
+        self.assertEqual(supply["inbound_units"], 100)
+        self.assertEqual(supply["received_units"], 0)
+        self.assertEqual(supply["procurement_committed_cost"], 1_850.0)
+        self.assertEqual(supply["purchase_orders"][0]["status"], "OPEN")
+        self.assertIsNone(supply["purchase_orders"][0]["actual_receipt_minute"])
+
+    def test_purchase_order_unknown_session_and_supplier_return_not_found(self):
+        unknown_session_id = "00000000-0000-0000-0000-000000000000"
+        unknown_session_response = self.client.post(
+            f"/sessions/{unknown_session_id}/actions/place-purchase-order",
+            json={"supplier_id": "STEEL-01", "quantity": 10},
+        )
+        self.assertEqual(unknown_session_response.status_code, 404)
+
+        session = self.create_session()
+        unknown_supplier_response = self.client.post(
+            f"/sessions/{session['session_id']}/actions/place-purchase-order",
+            json={"supplier_id": "UNKNOWN", "quantity": 10},
+        )
+        self.assertEqual(unknown_supplier_response.status_code, 404)
+        current = self.client.get(f"/sessions/{session['session_id']}").json()
+        self.assertEqual(current["event_digest"], session["event_digest"])
+        self.assertEqual(current["summary"], session["summary"])
+
+    def test_purchase_order_rejects_invalid_body_and_quantity(self):
+        session_id = self.create_session()["session_id"]
+
+        for payload in (
+            {},
+            {"supplier_id": "", "quantity": 10},
+            {"supplier_id": "STEEL-01"},
+            {"supplier_id": "STEEL-01", "quantity": 0},
+            {"supplier_id": "STEEL-01", "quantity": -1},
+            {"supplier_id": "STEEL-01", "quantity": 1_001},
+            {"supplier_id": "STEEL-01", "quantity": True},
+            {"supplier_id": "STEEL-01", "quantity": 1.5},
+        ):
+            with self.subTest(payload=payload):
+                response = self.client.post(
+                    f"/sessions/{session_id}/actions/place-purchase-order",
                     json=payload,
                 )
                 self.assertEqual(response.status_code, 422)

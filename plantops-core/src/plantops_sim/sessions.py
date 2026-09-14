@@ -116,6 +116,17 @@ class SessionManager:
             session.simulation.reprioritize_order(order_id, priority)
             return self._snapshot(session)
 
+    def place_purchase_order(
+        self,
+        session_id: str,
+        supplier_id: str,
+        quantity: int,
+    ) -> dict[str, Any]:
+        with self._lock:
+            session = self._require_session(session_id)
+            session.simulation.place_purchase_order(supplier_id, quantity)
+            return self._snapshot(session)
+
     def _require_session(self, session_id: str) -> SimulationSession:
         try:
             return self._sessions[session_id]

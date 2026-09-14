@@ -6,6 +6,8 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 from .engine import (
+    MAX_PURCHASE_QUANTITY,
+    InvalidPurchaseQuantityError,
     InvalidOrderPriorityError,
     MachineNotDownError,
     OrderCannotBeReprioritizedError,
@@ -13,6 +15,7 @@ from .engine import (
     ProductionLineSimulation,
     UnknownMachineError,
     UnknownOrderError,
+    UnknownSupplierError,
 )
 from .scenario import make_mvp_scenario
 from .sessions import SessionManager, SessionNotFoundError, SessionPausedError
@@ -49,6 +52,11 @@ class ExpediteRepairRequest(BaseModel):
 class PrioritizeOrderRequest(BaseModel):
     order_id: str = Field(min_length=1)
     priority: int = Field(strict=True, ge=0, le=100)
+
+
+class PlacePurchaseOrderRequest(BaseModel):
+    supplier_id: str = Field(min_length=1)
+    quantity: int = Field(strict=True, ge=1, le=MAX_PURCHASE_QUANTITY)
 
 
 @app.get("/health")
@@ -151,6 +159,26 @@ def prioritize_order(
     except OrderCannotBeReprioritizedError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except InvalidOrderPriorityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@app.post("/sessions/{session_id}/actions/place-purchase-order")
+def place_purchase_order(
+    session_id: str,
+    request: PlacePurchaseOrderRequest,
+) -> dict[str, Any]:
+    try:
+        return session_manager.place_purchase_order(
+            session_id,
+            request.supplier_id,
+            request.quantity,
+        )
+    except (SessionNotFoundError, UnknownSupplierError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except InvalidPurchaseQuantityError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),

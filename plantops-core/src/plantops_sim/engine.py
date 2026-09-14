@@ -16,8 +16,14 @@ from .model import (
     OrderConfig,
     OrderState,
     OrderStatus,
+    PurchaseOrderState,
+    PurchaseOrderStatus,
     Scenario,
+    SupplierConfig,
 )
+
+
+MAX_PURCHASE_QUANTITY = 1_000
 
 
 class SimulationDomainError(Exception):
@@ -58,6 +64,19 @@ class InvalidOrderPriorityError(SimulationDomainError):
         )
 
 
+class UnknownSupplierError(SimulationDomainError):
+    def __init__(self, supplier_id: str) -> None:
+        super().__init__(f"Supplier '{supplier_id}' was not found")
+
+
+class InvalidPurchaseQuantityError(SimulationDomainError):
+    def __init__(self, quantity: object) -> None:
+        super().__init__(
+            "Purchase quantity must be an integer from 1 through "
+            f"{MAX_PURCHASE_QUANTITY}; got {quantity!r}"
+        )
+
+
 class RandomStreams:
     """Stable named PRNG streams; Python's randomized hash is never used."""
 
@@ -88,6 +107,14 @@ class ProductionLineSimulation:
         self.rng = RandomStreams(seed)
         self.event_log: list[EventRecord] = []
         self._completion_recorded = False
+        self._next_raw_unit_id = scenario.raw_material_units + 1
+        self._purchase_order_sequence = 0
+        self.purchase_orders: dict[str, PurchaseOrderState] = {}
+        self.suppliers: dict[str, SupplierConfig] = {}
+        for supplier in scenario.suppliers:
+            if supplier.id in self.suppliers:
+                raise ValueError(f"Duplicate supplier ID: {supplier.id}")
+            self.suppliers[supplier.id] = supplier
         self.buffers: dict[str, Buffer] = {
             buffer_id: (
                 FinishedGoodsInventory(buffer_id, capacity)
@@ -354,6 +381,106 @@ class ProductionLineSimulation:
             ),
         )
 
+    def place_purchase_order(
+        self,
+        supplier_id: str,
+        quantity: int,
+    ) -> PurchaseOrderState:
+        """Commit a replenishment order and schedule its deterministic receipt."""
+        if type(quantity) is not int or not 1 <= quantity <= MAX_PURCHASE_QUANTITY:
+            raise InvalidPurchaseQuantityError(quantity)
+
+        supplier = self.suppliers.get(supplier_id)
+        if supplier is None:
+            raise UnknownSupplierError(supplier_id)
+
+        self._purchase_order_sequence += 1
+        purchase_order_id = f"PO-{self._purchase_order_sequence:06d}"
+        stream_prefix = f"supplier:{supplier.id}"
+        lead_minutes = self.rng.get(f"{stream_prefix}:lead").uniform(
+            supplier.min_lead_minutes,
+            supplier.max_lead_minutes,
+        )
+        promised_receipt_minute = self.clock + lead_minutes
+        is_late = (
+            self.rng.get(f"{stream_prefix}:late").random()
+            < supplier.late_probability
+        )
+        actual_receipt_minute = promised_receipt_minute
+        if is_late:
+            delay_minutes = supplier.max_delay_minutes * (
+                1.0 - self.rng.get(f"{stream_prefix}:delay").random()
+            )
+            actual_receipt_minute += delay_minutes
+
+        purchase_order = PurchaseOrderState(
+            id=purchase_order_id,
+            supplier_id=supplier.id,
+            quantity=quantity,
+            placed_minute=self.clock,
+            promised_receipt_minute=promised_receipt_minute,
+            unit_cost=supplier.unit_cost,
+            total_committed_cost=round(quantity * supplier.unit_cost, 2),
+        )
+        self.purchase_orders[purchase_order.id] = purchase_order
+        self._schedule(
+            actual_receipt_minute,
+            "MATERIAL_RECEIVED",
+            purchase_order.id,
+        )
+        self._record(
+            "PURCHASE_ORDER_PLACED",
+            detail=(
+                f"purchase_order_id={purchase_order.id};"
+                f"supplier_id={purchase_order.supplier_id};"
+                f"quantity={purchase_order.quantity};"
+                "promised_receipt_minute="
+                f"{purchase_order.promised_receipt_minute:g};"
+                f"unit_cost={purchase_order.unit_cost:.2f};"
+                f"total_committed_cost={purchase_order.total_committed_cost:.2f}"
+            ),
+        )
+        return purchase_order
+
+    def _receive_material(self, purchase_order: PurchaseOrderState) -> None:
+        if purchase_order.status != PurchaseOrderStatus.OPEN:
+            return
+
+        purchase_order.actual_receipt_minute = self.clock
+        is_late = self.clock > purchase_order.promised_receipt_minute
+        purchase_order.status = (
+            PurchaseOrderStatus.RECEIVED_LATE
+            if is_late
+            else PurchaseOrderStatus.RECEIVED_ON_TIME
+        )
+        if is_late:
+            self._record(
+                "PURCHASE_ORDER_LATE",
+                detail=(
+                    f"purchase_order_id={purchase_order.id};"
+                    f"supplier_id={purchase_order.supplier_id};"
+                    "promised_receipt_minute="
+                    f"{purchase_order.promised_receipt_minute:g};"
+                    f"actual_receipt_minute={self.clock:g}"
+                ),
+            )
+
+        first_unit_id = self._next_raw_unit_id
+        for _ in range(purchase_order.quantity):
+            self.buffers["raw"].put(self._next_raw_unit_id)
+            self._next_raw_unit_id += 1
+        last_unit_id = self._next_raw_unit_id - 1
+        self._record(
+            "MATERIAL_RECEIVED",
+            detail=(
+                f"purchase_order_id={purchase_order.id};"
+                f"supplier_id={purchase_order.supplier_id};"
+                f"quantity={purchase_order.quantity};"
+                f"first_unit_id={first_unit_id};last_unit_id={last_unit_id};"
+                f"status={purchase_order.status.value}"
+            ),
+        )
+
     def _resolve_machine(self, machine_id: str) -> Machine:
         normalized_id = machine_id.strip().casefold().replace("-", "_")
         machine = self.machines.get(normalized_id)
@@ -414,6 +541,9 @@ class ProductionLineSimulation:
             elif kind == "ORDER_DUE":
                 assert target_id is not None
                 self._mark_order_due(self.orders[target_id])
+            elif kind == "MATERIAL_RECEIVED":
+                assert target_id is not None
+                self._receive_material(self.purchase_orders[target_id])
             else:
                 raise RuntimeError(f"Unknown event type: {kind}")
             self._attempt_all_starts()
@@ -461,6 +591,7 @@ class ProductionLineSimulation:
         finished_goods_allocated = self.finished_goods.allocated_size
         finished_goods_total = self.finished_goods.size
         order_summary = self._order_summary()
+        supply_summary = self._supply_summary()
         if finished_goods_total != finished_goods_available + finished_goods_allocated:
             raise RuntimeError("Finished-goods accounting invariant was violated")
         if finished_goods_allocated != order_summary["units_delivered"]:
@@ -480,6 +611,67 @@ class ProductionLineSimulation:
             "machine_metrics": machine_metrics,
             "event_counts": dict(sorted(Counter(event.kind for event in self.event_log).items())),
             "order_summary": order_summary,
+            "supply_summary": supply_summary,
+        }
+
+    def _supply_summary(self) -> dict[str, Any]:
+        purchase_orders = [
+            self.purchase_orders[purchase_order_id]
+            for purchase_order_id in sorted(self.purchase_orders)
+        ]
+        open_orders = [
+            purchase_order
+            for purchase_order in purchase_orders
+            if purchase_order.status == PurchaseOrderStatus.OPEN
+        ]
+        received_orders = [
+            purchase_order
+            for purchase_order in purchase_orders
+            if purchase_order.status != PurchaseOrderStatus.OPEN
+        ]
+        return {
+            "raw_material_on_hand": self.buffers["raw"].size,
+            "purchase_orders_total": len(purchase_orders),
+            "purchase_orders_open": len(open_orders),
+            "purchase_orders_received": len(received_orders),
+            "purchase_orders_late": sum(
+                purchase_order.status == PurchaseOrderStatus.RECEIVED_LATE
+                for purchase_order in purchase_orders
+            ),
+            "inbound_units": sum(
+                purchase_order.quantity for purchase_order in open_orders
+            ),
+            "received_units": sum(
+                purchase_order.quantity for purchase_order in received_orders
+            ),
+            "procurement_committed_cost": round(
+                sum(
+                    purchase_order.total_committed_cost
+                    for purchase_order in purchase_orders
+                ),
+                2,
+            ),
+            "purchase_orders": [
+                {
+                    "id": purchase_order.id,
+                    "supplier_id": purchase_order.supplier_id,
+                    "quantity": purchase_order.quantity,
+                    "placed_minute": round(purchase_order.placed_minute, 6),
+                    "promised_receipt_minute": round(
+                        purchase_order.promised_receipt_minute,
+                        6,
+                    ),
+                    "actual_receipt_minute": (
+                        round(purchase_order.actual_receipt_minute, 6)
+                        if purchase_order.actual_receipt_minute is not None
+                        else None
+                    ),
+                    "unit_cost": purchase_order.unit_cost,
+                    "total_committed_cost": purchase_order.total_committed_cost,
+                    "status": purchase_order.status.value,
+                }
+                for purchase_order in purchase_orders
+            ],
         }
 
     def _order_summary(self) -> dict[str, Any]:

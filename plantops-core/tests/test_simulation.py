@@ -36,7 +36,7 @@ class ProductionLineSimulationTests(unittest.TestCase):
     def test_line_produces_good_units(self):
         _, result = self.run_simulation(42, cnc_failure_probability=0)
         self.assertGreater(result["good_production"], 0)
-        self.assertLessEqual(result["good_production"] + result["scrap"], 500)
+        self.assertLessEqual(result["good_production"] + result["scrap"], 200)
 
     def test_forced_machine_failures_create_downtime(self):
         sim, result = self.run_simulation(42, cnc_failure_probability=1.0)
@@ -164,7 +164,7 @@ class ProductionLineSimulationTests(unittest.TestCase):
 
         self.assertEqual(
             simulation.digest(),
-            "a0b13826abaddf740ff0f86b5b517b4c58343d2166046230de820e760234615a",
+            "45bc487a77b346a46b7ebbe1163270d9863341613d9f1177e9378dade7bf3089",
         )
 
 

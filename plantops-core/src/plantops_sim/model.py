@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum
+from math import isfinite
 
 
 class MachineState(StrEnum):
@@ -19,6 +20,12 @@ class OrderStatus(StrEnum):
     LATE = "LATE"
     COMPLETED_ON_TIME = "COMPLETED_ON_TIME"
     COMPLETED_LATE = "COMPLETED_LATE"
+
+
+class PurchaseOrderStatus(StrEnum):
+    OPEN = "OPEN"
+    RECEIVED_ON_TIME = "RECEIVED_ON_TIME"
+    RECEIVED_LATE = "RECEIVED_LATE"
 
 
 @dataclass(frozen=True)
@@ -76,6 +83,60 @@ class UrgentOrderRule:
 
 
 @dataclass(frozen=True)
+class SupplierConfig:
+    id: str
+    name: str
+    min_lead_minutes: float
+    max_lead_minutes: float
+    late_probability: float
+    max_delay_minutes: float
+    unit_cost: float
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.id, str) or not self.id.strip():
+            raise ValueError("Supplier ID cannot be empty")
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("Supplier name cannot be empty")
+        if (
+            isinstance(self.min_lead_minutes, bool)
+            or not isinstance(self.min_lead_minutes, (int, float))
+            or not isfinite(self.min_lead_minutes)
+            or self.min_lead_minutes <= 0
+        ):
+            raise ValueError("Supplier minimum lead minutes must be a positive number")
+        if (
+            isinstance(self.max_lead_minutes, bool)
+            or not isinstance(self.max_lead_minutes, (int, float))
+            or not isfinite(self.max_lead_minutes)
+            or self.max_lead_minutes < self.min_lead_minutes
+        ):
+            raise ValueError(
+                "Supplier maximum lead minutes must be at least the minimum lead minutes"
+            )
+        if (
+            isinstance(self.late_probability, bool)
+            or not isinstance(self.late_probability, (int, float))
+            or not isfinite(self.late_probability)
+            or not 0 <= self.late_probability <= 1
+        ):
+            raise ValueError("Supplier late probability must be between 0 and 1")
+        if (
+            isinstance(self.max_delay_minutes, bool)
+            or not isinstance(self.max_delay_minutes, (int, float))
+            or not isfinite(self.max_delay_minutes)
+            or self.max_delay_minutes <= 0
+        ):
+            raise ValueError("Supplier maximum delay minutes must be a positive number")
+        if (
+            isinstance(self.unit_cost, bool)
+            or not isinstance(self.unit_cost, (int, float))
+            or not isfinite(self.unit_cost)
+            or self.unit_cost <= 0
+        ):
+            raise ValueError("Supplier unit cost must be a positive number")
+
+
+@dataclass(frozen=True)
 class Scenario:
     raw_material_units: int
     shift_minutes: float
@@ -83,6 +144,7 @@ class Scenario:
     buffer_capacities: dict[str, int | None]
     orders: tuple[OrderConfig, ...] = ()
     urgent_order_rule: UrgentOrderRule | None = None
+    suppliers: tuple[SupplierConfig, ...] = ()
 
 
 @dataclass
@@ -112,6 +174,19 @@ class OrderState:
     @property
     def remaining_quantity(self) -> int:
         return self.requested_quantity - self.fulfilled_quantity
+
+
+@dataclass
+class PurchaseOrderState:
+    id: str
+    supplier_id: str
+    quantity: int
+    placed_minute: float
+    promised_receipt_minute: float
+    unit_cost: float
+    total_committed_cost: float
+    actual_receipt_minute: float | None = None
+    status: PurchaseOrderStatus = PurchaseOrderStatus.OPEN
 
 
 @dataclass

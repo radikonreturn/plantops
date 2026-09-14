@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from .model import OrderConfig, Scenario, StageConfig, UrgentOrderRule
+from .model import (
+    OrderConfig,
+    Scenario,
+    StageConfig,
+    SupplierConfig,
+    UrgentOrderRule,
+)
 
 
 def make_mvp_scenario(
     *,
-    raw_material_units: int = 500,
+    raw_material_units: int = 200,
     shift_minutes: float = 480,
     cnc_failure_probability: float = 0.055,
 ) -> Scenario:
@@ -54,12 +60,23 @@ def make_mvp_scenario(
         lead_time_minutes=70,
         priority=10,
     )
+    suppliers = (
+        SupplierConfig(
+            id="STEEL-01",
+            name="Anatolia Steel Blanks",
+            min_lead_minutes=60,
+            max_lead_minutes=90,
+            late_probability=0.2,
+            max_delay_minutes=45,
+            unit_cost=18.5,
+        ),
+    )
     return Scenario(
         raw_material_units=raw_material_units,
         shift_minutes=shift_minutes,
         stages=stages,
         buffer_capacities={
-            "raw": raw_material_units,
+            "raw": None,
             "after_cnc_01": 18,
             "after_wash_01": 14,
             "after_assembly_01": 12,
@@ -67,4 +84,5 @@ def make_mvp_scenario(
         },
         orders=orders,
         urgent_order_rule=urgent_order_rule,
+        suppliers=suppliers,
     )

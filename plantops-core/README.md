@@ -39,6 +39,7 @@ The MVP scenario includes:
 - Independent in-memory simulation sessions with pause, resume, and speed controls
 - Customer orders, seeded urgent demand, delivery status, and OTIF performance
 - FIFO finished-goods inventory with warehouse and backlog accounting
+- Player-initiated steel-blank purchasing with deterministic supplier receipts
 
 ## WSL quick start
 
@@ -125,47 +126,58 @@ Example response (abridged):
   "summary": {
     "seed": 42,
     "simulated_minutes": 480,
-    "good_production": 255,
+    "good_production": 193,
     "scrap": 7,
-    "quality": 0.9733,
-    "oee": 0.9089,
+    "quality": 0.965,
+    "oee": 0.9135,
     "wip": 0,
-    "raw_material_remaining": 238,
+    "raw_material_remaining": 0,
     "finished_goods_available": 0,
-    "finished_goods_allocated": 255,
-    "finished_goods_total": 255,
+    "finished_goods_allocated": 193,
+    "finished_goods_total": 193,
     "machine_metrics": {
       "cnc_01": {
-        "state": "DOWN",
-        "processed": 262,
-        "failures": 10,
-        "availability": 0.7368
+        "state": "STARVED",
+        "processed": 200,
+        "failures": 8,
+        "availability": 0.7879
       }
     },
     "event_counts": {
-      "MACHINE_FAILED": 10,
+      "MACHINE_FAILED": 8,
       "ORDER_DUE": 4,
       "ORDER_LATE": 3,
-      "PROCESS_COMPLETED": 1041,
+      "PROCESS_COMPLETED": 793,
       "UNIT_SCRAPPED": 7
     },
     "order_summary": {
       "orders_total": 4,
       "orders_released": 4,
       "orders_due": 4,
-      "orders_completed": 3,
+      "orders_completed": 2,
       "orders_late": 3,
       "units_ordered": 308,
-      "units_delivered": 255,
-      "units_on_time": 196,
-      "units_late": 59,
-      "backlog_units": 53,
-      "backlog_orders": 1,
+      "units_delivered": 193,
+      "units_on_time": 152,
+      "units_late": 41,
+      "backlog_units": 115,
+      "backlog_orders": 2,
       "otif": 0.25,
       "orders": []
+    },
+    "supply_summary": {
+      "raw_material_on_hand": 0,
+      "purchase_orders_total": 0,
+      "purchase_orders_open": 0,
+      "purchase_orders_received": 0,
+      "purchase_orders_late": 0,
+      "inbound_units": 0,
+      "received_units": 0,
+      "procurement_committed_cost": 0,
+      "purchase_orders": []
     }
   },
-  "event_digest": "a0b13826abaddf740ff0f86b5b517b4c58343d2166046230de820e760234615a"
+  "event_digest": "45bc487a77b346a46b7ebbe1163270d9863341613d9f1177e9378dade7bf3089"
 }
 ```
 
@@ -204,7 +216,29 @@ finished_goods_total = finished_goods_available + finished_goods_allocated
 finished_goods_total = good_production
 ```
 
-Supplier replenishment and raw-material purchasing are intentionally deferred to a later phase. This phase models only finished-goods storage and customer-order allocation.
+## Supplier purchasing and raw-material replenishment
+
+The MVP begins with **200 raw steel blanks**. This is intentionally below the 260 units of normal demand plus the seeded urgent order, so the line will eventually starve unless the player purchases more material. PlantOps never creates purchase orders automatically.
+
+The scenario has one supplier:
+
+| Supplier | Lead time | Late-delivery risk | Maximum extra delay | Unit cost |
+| --- | ---: | ---: | ---: | ---: |
+| `STEEL-01` — Anatolia Steel Blanks | 60–90 minutes | 20% | 45 minutes | 18.50 |
+
+Normal lead time, the late-delivery decision, and extra delay use dedicated supplier RNG streams derived from the simulation seed. They do not consume randomness from machine cycles, failures, repairs, Quality scrap, or urgent demand. The same seed and purchasing action sequence therefore reproduces the same receipts.
+
+Placing a purchase order commits its full cost but does not immediately increase raw stock. An open order exposes its promised receipt minute while `actual_receipt_minute` remains `null`. If delivery is delayed, the actual minute and `RECEIVED_LATE` status become visible only when material arrives; the engine records `PURCHASE_ORDER_LATE` once at that time. Every receipt records `MATERIAL_RECEIVED`, creates brand-new raw-unit IDs, and lets a starved CNC restart.
+
+`supply_summary` contains:
+
+- `raw_material_on_hand`, which always equals legacy `raw_material_remaining`
+- Total, open, received, and late purchase-order counts
+- `inbound_units` for open orders and `received_units` for completed receipts
+- `procurement_committed_cost`, separate from emergency-repair `intervention_cost`
+- An API-safe `purchase_orders` list with quantity, supplier, placed minute, promised and actual receipt minutes, costs, and status
+
+Supplier material quality and multi-material bills of materials are later phases. This MVP replenishes only the single raw unit consumed by CNC.
 
 ### OTIF definition
 
@@ -239,6 +273,7 @@ Sessions and player actions are an in-memory MVP. They are lost when the API pro
 | `PUT` | `/sessions/{session_id}/speed` | Set playback speed to `1`, `2`, or `4` |
 | `POST` | `/sessions/{session_id}/actions/expedite-repair` | Immediately repair a DOWN machine |
 | `POST` | `/sessions/{session_id}/actions/prioritize-order` | Change an active order's priority |
+| `POST` | `/sessions/{session_id}/actions/place-purchase-order` | Order raw material from a supplier |
 
 ### Create a session
 
@@ -266,6 +301,14 @@ The response contains a UUID, session controls, the initial simulation summary, 
     "finished_goods_available": 0,
     "finished_goods_allocated": 0,
     "finished_goods_total": 0,
+    "supply_summary": {
+      "raw_material_on_hand": 200,
+      "purchase_orders_total": 0,
+      "inbound_units": 0,
+      "received_units": 0,
+      "procurement_committed_cost": 0,
+      "purchase_orders": []
+    },
     "order_summary": {
       "orders_total": 4,
       "orders_released": 3,
@@ -342,6 +385,19 @@ Priority affects future warehouse allocations only. Finished goods already alloc
 
 Raising one order's priority can therefore delay another order with the same due minute. Unknown sessions or orders return HTTP `404`, ineligible orders return `409`, and invalid request bodies or priorities outside `0`–`100` return `422`. Repeating the current priority is a successful no-op and creates no additional audit event.
 
+### Place a purchase order
+
+Purchase between 1 and 1,000 raw units from the MVP supplier. This planning action is allowed while the session is paused and does not change emergency-repair `intervention_cost`.
+
+```bash
+curl -X POST \
+  http://127.0.0.1:8000/sessions/{session_id}/actions/place-purchase-order \
+  -H "Content-Type: application/json" \
+  -d '{"supplier_id": "STEEL-01", "quantity": 100}'
+```
+
+The returned session snapshot immediately shows the order as `OPEN`, its promised receipt minute, 100 `inbound_units`, and 1,850.00 of committed procurement cost. Raw stock changes only when simulation time reaches the deterministic actual receipt. Unknown sessions or suppliers return HTTP `404`; invalid bodies or quantities return `422`.
+
 ## Deterministic by design
 
 Each source of randomness uses a stable, named pseudo-random stream derived from the selected seed. Running the same scenario with the same seed and duration produces the same summary and event digest. This makes PlantOps useful for regression tests, scenario comparisons, and reproducible experiments.
@@ -364,7 +420,7 @@ Run the complete test suite from the `plantops-core` directory:
 python -m unittest discover -s tests -v
 ```
 
-The tests cover deterministic replay, seeded urgent orders, FIFO warehouse allocation, backlog and inventory invariants, allocation priority and timing, deadlines, OTIF, incremental advancement, event cancellation, expedited repairs, intervention costs, production output, machine behavior, API health, input validation, and the complete session lifecycle.
+The tests cover deterministic replay, seeded urgent orders, FIFO warehouse allocation, backlog and inventory invariants, allocation priority and timing, supplier lead times, purchasing, material receipts, starvation recovery, deadlines, OTIF, incremental advancement, event cancellation, expedited repairs, intervention costs, production output, machine behavior, API health, input validation, and the complete session lifecycle.
 
 ## Project structure
 
@@ -380,7 +436,8 @@ plantops-core/
 ├── tests/
 │   ├── test_api.py
 │   ├── test_orders.py
-│   └── test_simulation.py
+│   ├── test_simulation.py
+│   └── test_supply.py
 └── pyproject.toml
 ```
 
