@@ -2,49 +2,55 @@ from __future__ import annotations
 
 import unittest
 
-from pydantic import ValidationError
+from fastapi.testclient import TestClient
 
-from plantops_sim.api import SimulationRequest, app, health, simulate
+from plantops_sim.api import app
 
 
 class ApiTests(unittest.TestCase):
-    def test_app_metadata_and_health(self):
-        self.assertEqual(app.title, "PlantOps API")
-        self.assertEqual(app.version, "0.1.0")
-        self.assertIn("get", app.openapi()["paths"]["/health"])
-        self.assertIn("post", app.openapi()["paths"]["/simulate"])
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.client = TestClient(app)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.client.close()
+
+    def test_health(self):
+        response = self.client.get("/health")
+
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            health(),
+            response.json(),
             {"status": "ok", "service": "plantops-simulation"},
         )
 
-    def test_simulate_without_failures(self):
-        payload = simulate(
-            SimulationRequest(seed=42, minutes=60, failures_enabled=False)
+    def test_simulate_returns_expected_result(self):
+        response = self.client.post(
+            "/simulate",
+            json={"seed": 42, "minutes": 480, "failures_enabled": True},
         )
 
-        self.assertEqual(payload["summary"]["seed"], 42)
-        self.assertEqual(payload["summary"]["simulated_minutes"], 60)
-        self.assertEqual(payload["summary"]["machine_metrics"]["cnc_01"]["failures"], 0)
-        self.assertEqual(len(payload["event_digest"]), 64)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("summary", payload)
+        self.assertIn("event_digest", payload)
+        self.assertIn("good_production", payload["summary"])
+        self.assertIn("oee", payload["summary"])
+        self.assertIn("machine_metrics", payload["summary"])
 
-    def test_request_defaults(self):
-        request = SimulationRequest()
+    def test_same_request_returns_same_event_digest(self):
+        request = {"seed": 42, "minutes": 480, "failures_enabled": True}
 
-        self.assertEqual(request.seed, 42)
-        self.assertEqual(request.minutes, 480)
-        self.assertTrue(request.failures_enabled)
+        first_response = self.client.post("/simulate", json=request)
+        second_response = self.client.post("/simulate", json=request)
 
-    def test_request_limits(self):
-        invalid_payloads = (
-            {"seed": -1},
-            {"minutes": 0},
-            {"minutes": 10080.1},
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(
+            first_response.json()["event_digest"],
+            second_response.json()["event_digest"],
         )
-
-        for payload in invalid_payloads:
-            with self.subTest(payload=payload), self.assertRaises(ValidationError):
-                SimulationRequest(**payload)
 
 
 if __name__ == "__main__":

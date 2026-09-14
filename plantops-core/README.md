@@ -37,18 +37,19 @@ The MVP scenario includes:
 - OEE, availability, performance, WIP, downtime, and production metrics
 - A SHA-256 event digest for reproducibility checks
 
-## Quick start
+## WSL quick start
 
-PlantOps requires Python 3.11 or newer.
+PlantOps requires Python 3.11 or newer. Open a WSL terminal, navigate to the repository, and run these commands from the `plantops-core` directory:
 
 ```bash
 cd plantops-core
-
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e .
+python -m pip install -e ".[test]"
 ```
+
+The shell prompt should now begin with `(.venv)`. Run `deactivate` when you want to leave the virtual environment.
 
 ### Run from the command line
 
@@ -67,14 +68,17 @@ The CLI prints the complete simulation summary followed by its deterministic eve
 ### Run the API
 
 ```bash
-uvicorn plantops_sim.api:app --reload
+python -m uvicorn plantops_sim.api:app --reload
 ```
 
-Once running, open:
+Keep that terminal running, then open Swagger UI in your browser:
 
-- Interactive Swagger documentation: <http://127.0.0.1:8000/docs>
-- Alternative ReDoc documentation: <http://127.0.0.1:8000/redoc>
-- Health endpoint: <http://127.0.0.1:8000/health>
+<http://127.0.0.1:8000/docs>
+
+Additional endpoints:
+
+- ReDoc documentation: <http://127.0.0.1:8000/redoc>
+- Health check: <http://127.0.0.1:8000/health>
 
 ## API reference
 
@@ -111,27 +115,38 @@ curl -X POST http://127.0.0.1:8000/simulate \
   }'
 ```
 
-Response shape:
+Example response (abridged):
 
 ```json
 {
   "summary": {
     "seed": 42,
-    "simulated_minutes": 480.0,
-    "good_production": 0,
-    "scrap": 0,
-    "quality": 0.0,
-    "oee": 0.0,
+    "simulated_minutes": 480,
+    "good_production": 255,
+    "scrap": 7,
+    "quality": 0.9733,
+    "oee": 0.9131,
     "wip": 0,
-    "raw_material_remaining": 0,
-    "machine_metrics": {},
-    "event_counts": {}
+    "raw_material_remaining": 238,
+    "machine_metrics": {
+      "cnc_01": {
+        "state": "DOWN",
+        "processed": 262,
+        "failures": 10,
+        "availability": 0.754
+      }
+    },
+    "event_counts": {
+      "MACHINE_FAILED": 10,
+      "PROCESS_COMPLETED": 1041,
+      "UNIT_SCRAPPED": 7
+    }
   },
-  "event_digest": "<sha256>"
+  "event_digest": "84f1db849486e5aa798eca697277bbf1fb83d2aea29714fc44afbd31f9081f88"
 }
 ```
 
-The numeric values above illustrate the response structure; every run returns the metrics calculated by the simulation.
+The API returns metrics for every machine and event type; they are shortened above for readability.
 
 ## Deterministic by design
 
@@ -155,7 +170,7 @@ Run the complete test suite from the `plantops-core` directory:
 python -m unittest discover -s tests -v
 ```
 
-The tests cover deterministic replay, seed variation, production output, failures and repairs, blocking, starvation, quality metrics, API metadata, request validation, and failure-free API runs.
+The tests cover deterministic replay, seed variation, production output, failures and repairs, blocking, starvation, quality metrics, API health, the simulation response contract, and deterministic API requests.
 
 ## Project structure
 
