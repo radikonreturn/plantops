@@ -12,6 +12,28 @@
 
 PlantOps models the authoritative operational state of a small manufacturing line. It is intentionally headless and focused: the simulation engine handles production flow, machine state, failures, repairs, scrap, and performance metrics, while the API exposes repeatable simulation runs to other applications.
 
+The repository now includes the first playable operator console in `plantops-web/`. It is a deliberately dense MES/SCADA-style browser surface: the factory floor is the main view, while orders, purchasing, repairs, and preventive maintenance remain backed by the authoritative in-memory session API.
+
+## Playable web console
+
+Start the backend in one WSL terminal:
+
+```bash
+cd plantops-core && source .venv/bin/activate && uvicorn plantops_sim.api:app --reload --port 8000
+```
+
+Start the Vite operator console in a second WSL terminal:
+
+```bash
+cd plantops-web && npm install && npm run dev
+```
+
+Then open the browser console at <http://localhost:5173>. The API's interactive Swagger documentation remains at <http://127.0.0.1:8000/docs>.
+
+The API allows browser requests from `http://localhost:5173` and `http://127.0.0.1:5173` for local development.
+
+The frontend defaults to `http://127.0.0.1:8000`; copy `plantops-web/.env.example` to `plantops-web/.env` to override `VITE_API_BASE_URL`. On first load it creates the deterministic seed-42 session and pauses it so the operator explicitly starts the shift. Playback advances one simulated minute per second at 1×, two at 2×, and four at 4×, then pauses at the 480-minute shift boundary.
+
 ## Production line
 
 ```text

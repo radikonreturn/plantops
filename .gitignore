@@ -90,3 +90,8 @@ logs/
 *.temp
 *.sqlite3
 *.db
+
+# PlantOps local build artifacts
+plantops-web/node_modules/
+plantops-web/dist/
+plantops-core/.venv/

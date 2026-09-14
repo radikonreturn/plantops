@@ -729,6 +729,7 @@ class ProductionLineSimulation:
         return {
             "seed": self.seed,
             "simulated_minutes": round(self.clock, 3),
+            "shift_minutes": self.scenario.shift_minutes,
             "good_production": good,
             "scrap": quality_machine.scrap_units,
             "quality": round(quality, 4),
@@ -738,6 +739,10 @@ class ProductionLineSimulation:
             "finished_goods_available": finished_goods_available,
             "finished_goods_allocated": finished_goods_allocated,
             "finished_goods_total": finished_goods_total,
+            "buffer_levels": {
+                buffer_id: buffer.size
+                for buffer_id, buffer in self.buffers.items()
+            },
             "machine_metrics": machine_metrics,
             "event_counts": dict(sorted(Counter(event.kind for event in self.event_log).items())),
             "order_summary": order_summary,

@@ -28,6 +28,26 @@ class ApiTests(unittest.TestCase):
             {"status": "ok", "service": "plantops-simulation"},
         )
 
+    def test_local_vite_origins_are_allowed_by_cors(self):
+        for origin in (
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ):
+            with self.subTest(origin=origin):
+                response = self.client.options(
+                    "/sessions",
+                    headers={
+                        "Origin": origin,
+                        "Access-Control-Request-Method": "POST",
+                    },
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response.headers["access-control-allow-origin"],
+                    origin,
+                )
+
     def test_simulate_returns_expected_result(self):
         response = self.client.post(
             "/simulate",
@@ -41,6 +61,17 @@ class ApiTests(unittest.TestCase):
         self.assertIn("good_production", payload["summary"])
         self.assertIn("oee", payload["summary"])
         self.assertIn("machine_metrics", payload["summary"])
+        self.assertEqual(payload["summary"]["shift_minutes"], 480)
+        self.assertEqual(
+            set(payload["summary"]["buffer_levels"]),
+            {
+                "raw",
+                "after_cnc_01",
+                "after_wash_01",
+                "after_assembly_01",
+                "finished",
+            },
+        )
         self.assertIn("finished_goods_available", payload["summary"])
         self.assertIn("finished_goods_allocated", payload["summary"])
         self.assertIn("finished_goods_total", payload["summary"])
