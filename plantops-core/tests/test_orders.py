@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from plantops_sim import ProductionLineSimulation, make_mvp_scenario
-from plantops_sim.model import OrderConfig, Scenario, StageConfig
+from plantops_sim.model import OrderConfig, Scenario, StageConfig, UrgentOrderRule
 
 
 def make_controlled_order_scenario(
@@ -13,6 +13,7 @@ def make_controlled_order_scenario(
     cycle_minutes: float = 0.1,
     cnc_failure_probability: float = 0,
     repair_minutes: float = 0,
+    urgent_order_rule: UrgentOrderRule | None = None,
 ) -> Scenario:
     stages = tuple(
         StageConfig(
@@ -40,6 +41,7 @@ def make_controlled_order_scenario(
             "finished": None,
         },
         orders=orders,
+        urgent_order_rule=urgent_order_rule,
     )
 
 
@@ -190,6 +192,105 @@ class OrderSimulationTests(unittest.TestCase):
 
         self.assertEqual(ordinary_summary["otif"], 0.0)
         self.assertEqual(expedited_summary["otif"], 1.0)
+
+    def test_good_unit_waits_in_stock_before_order_release(self):
+        scenario = make_controlled_order_scenario(
+            raw_material_units=1,
+            orders=(OrderConfig("FUTURE", 1, 2, 5, 1),),
+        )
+        simulation = ProductionLineSimulation(scenario, seed=1)
+
+        summary = simulation.advance_to(1)
+
+        self.assertEqual(summary["good_production"], 1)
+        self.assertEqual(summary["finished_goods_available"], 1)
+        self.assertEqual(summary["finished_goods_allocated"], 0)
+        self.assertEqual(summary["order_summary"]["units_delivered"], 0)
+        self.assertEqual(summary["event_counts"]["FINISHED_GOODS_RECEIVED"], 1)
+
+    def test_order_release_consumes_existing_stock_immediately_in_fifo_order(self):
+        scenario = make_controlled_order_scenario(
+            raw_material_units=2,
+            orders=(OrderConfig("FUTURE", 2, 2, 5, 1),),
+        )
+        simulation = ProductionLineSimulation(scenario, seed=1)
+        simulation.advance_to(1)
+
+        summary = simulation.advance_to(2)
+
+        order = order_by_id(summary["order_summary"], "FUTURE")
+        self.assertEqual(order["fulfilled_quantity"], 2)
+        self.assertEqual(summary["finished_goods_available"], 0)
+        self.assertEqual(summary["finished_goods_allocated"], 2)
+        allocation_events = [
+            event for event in simulation.event_log if event.kind == "ORDER_UNIT_ALLOCATED"
+        ]
+        self.assertEqual([event.unit_id for event in allocation_events], [1, 2])
+        self.assertTrue(
+            all(event.detail == "order_id=FUTURE" for event in allocation_events)
+        )
+
+    def test_seeded_urgent_order_consumes_preexisting_stock(self):
+        urgent_rule = UrgentOrderRule(
+            id="URGENT",
+            min_arrival_minute=2,
+            max_arrival_minute=2,
+            min_quantity=1,
+            max_quantity=1,
+            lead_time_minutes=2,
+            priority=10,
+        )
+        scenario = make_controlled_order_scenario(
+            raw_material_units=1,
+            orders=(),
+            urgent_order_rule=urgent_rule,
+        )
+        simulation = ProductionLineSimulation(scenario, seed=1)
+        before_release = simulation.advance_to(1)
+
+        after_release = simulation.advance_to(2)
+
+        self.assertEqual(before_release["finished_goods_available"], 1)
+        self.assertEqual(after_release["finished_goods_available"], 0)
+        self.assertEqual(after_release["finished_goods_allocated"], 1)
+        self.assertEqual(after_release["order_summary"]["units_delivered"], 1)
+        self.assertEqual(after_release["event_counts"]["URGENT_ORDER_RECEIVED"], 1)
+
+    def test_stock_allocated_after_deadline_counts_as_late(self):
+        scenario = make_controlled_order_scenario(
+            raw_material_units=1,
+            orders=(OrderConfig("LATE-RELEASE", 1, 2, 1, 1),),
+        )
+        simulation = ProductionLineSimulation(scenario, seed=1)
+        manufactured = simulation.advance_to(1)
+
+        allocated = simulation.advance_to(2)
+
+        self.assertEqual(manufactured["finished_goods_available"], 1)
+        order = order_by_id(allocated["order_summary"], "LATE-RELEASE")
+        self.assertEqual(order["status"], "COMPLETED_LATE")
+        self.assertEqual(allocated["order_summary"]["units_on_time"], 0)
+        self.assertEqual(allocated["order_summary"]["units_late"], 1)
+
+    def test_finished_goods_and_backlog_accounting_invariants(self):
+        simulation = ProductionLineSimulation(make_mvp_scenario(), seed=42)
+
+        initial = simulation.summary()
+        final = simulation.run(480)
+
+        self.assertEqual(initial["order_summary"]["backlog_orders"], 3)
+        self.assertEqual(initial["order_summary"]["backlog_units"], 260)
+        for summary in (initial, final):
+            self.assertEqual(
+                summary["finished_goods_total"],
+                summary["finished_goods_available"]
+                + summary["finished_goods_allocated"],
+            )
+            self.assertEqual(summary["finished_goods_total"], summary["good_production"])
+            self.assertEqual(
+                summary["finished_goods_allocated"],
+                summary["order_summary"]["units_delivered"],
+            )
 
 
 if __name__ == "__main__":

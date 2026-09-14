@@ -41,6 +41,11 @@ class ApiTests(unittest.TestCase):
         self.assertIn("good_production", payload["summary"])
         self.assertIn("oee", payload["summary"])
         self.assertIn("machine_metrics", payload["summary"])
+        self.assertIn("finished_goods_available", payload["summary"])
+        self.assertIn("finished_goods_allocated", payload["summary"])
+        self.assertIn("finished_goods_total", payload["summary"])
+        self.assertIn("backlog_units", payload["summary"]["order_summary"])
+        self.assertIn("backlog_orders", payload["summary"]["order_summary"])
 
     def test_same_request_returns_same_event_digest(self):
         request = {"seed": 42, "minutes": 480, "failures_enabled": True}
@@ -93,6 +98,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(session["intervention_cost"], 0.0)
         self.assertEqual(session["summary"]["simulated_minutes"], 0)
         self.assertIn("order_summary", session["summary"])
+        self.assertIn("finished_goods_available", session["summary"])
+        self.assertIn("backlog_units", session["summary"]["order_summary"])
         self.assertNotIn("simulation", session)
 
     def test_advance_changes_time_without_replacing_session(self):

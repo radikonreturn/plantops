@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -47,8 +48,8 @@ class OrderConfig:
             raise ValueError("Order quantity must be greater than zero")
         if self.release_minute < 0:
             raise ValueError("Order release minute cannot be negative")
-        if self.due_minute <= self.release_minute:
-            raise ValueError("Order due minute must be after its release minute")
+        if self.due_minute < 0:
+            raise ValueError("Order due minute cannot be negative")
 
 
 @dataclass(frozen=True)
@@ -135,6 +136,35 @@ class Buffer:
     @property
     def size(self) -> int:
         return len(self.units)
+
+
+@dataclass
+class FinishedGoodsInventory(Buffer):
+    available_unit_ids: deque[int] = field(default_factory=deque)
+    allocated_order_by_unit: dict[int, str] = field(default_factory=dict)
+
+    def put(self, unit_id: int) -> None:
+        if unit_id in self.units:
+            raise RuntimeError(f"Finished-good unit {unit_id} was received twice")
+        super().put(unit_id)
+        self.available_unit_ids.append(unit_id)
+
+    def allocate_next(self, order_id: str) -> int:
+        if not self.available_unit_ids:
+            raise RuntimeError("No finished goods are available for allocation")
+        unit_id = self.available_unit_ids.popleft()
+        if unit_id in self.allocated_order_by_unit:
+            raise RuntimeError(f"Finished-good unit {unit_id} was allocated twice")
+        self.allocated_order_by_unit[unit_id] = order_id
+        return unit_id
+
+    @property
+    def available_size(self) -> int:
+        return len(self.available_unit_ids)
+
+    @property
+    def allocated_size(self) -> int:
+        return len(self.allocated_order_by_unit)
 
 
 @dataclass

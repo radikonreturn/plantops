@@ -38,6 +38,7 @@ The MVP scenario includes:
 - A SHA-256 event digest for reproducibility checks
 - Independent in-memory simulation sessions with pause, resume, and speed controls
 - Customer orders, seeded urgent demand, delivery status, and OTIF performance
+- FIFO finished-goods inventory with warehouse and backlog accounting
 
 ## WSL quick start
 
@@ -130,6 +131,9 @@ Example response (abridged):
     "oee": 0.9089,
     "wip": 0,
     "raw_material_remaining": 238,
+    "finished_goods_available": 0,
+    "finished_goods_allocated": 255,
+    "finished_goods_total": 255,
     "machine_metrics": {
       "cnc_01": {
         "state": "DOWN",
@@ -155,11 +159,13 @@ Example response (abridged):
       "units_delivered": 255,
       "units_on_time": 196,
       "units_late": 59,
+      "backlog_units": 53,
+      "backlog_orders": 1,
       "otif": 0.25,
       "orders": []
     }
   },
-  "event_digest": "2bb20a5fd90eda68d06327a1d3aa77a3e6d141cd7e01eac217bf3fee1c7f8fb6"
+  "event_digest": "a0b13826abaddf740ff0f86b5b517b4c58343d2166046230de820e760234615a"
 }
 ```
 
@@ -167,7 +173,9 @@ The API returns metrics for every machine and event type; they are shortened abo
 
 ## Customer orders and OTIF
 
-The MVP line produces one product family, so every good unit leaving Quality is allocated automatically to an active, incomplete customer order. Allocation never removes the unit from finished-production accounting: `good_production` remains the total number of good units made.
+The MVP line produces one product family, so customer orders are fulfilled automatically from finished-goods inventory. Every non-scrapped unit leaving Quality first enters the warehouse. The allocator then assigns available units to active, incomplete orders; stock remains available when no order is ready and can fulfill a later normal or urgent order immediately upon release.
+
+Allocation never removes a unit from finished-production accounting: `good_production` remains the total number of good units made. Warehouse units are consumed in deterministic FIFO order, and each unit can be assigned to at most one order.
 
 Orders carry a quantity, release minute, due minute, and priority. The allocator uses this stable sequence:
 
@@ -177,7 +185,26 @@ Orders carry a quantity, release minute, due minute, and priority. The allocator
 
 Three normal orders are available at minute zero. One urgent order arrives later in the shift; its arrival minute and quantity come from a dedicated `orders:urgent` random stream derived from the simulation seed. Its deadline is 70 minutes after arrival. The same seed therefore reproduces the same urgent order without changing the random streams used for machine cycles, failures, repairs, or scrap.
 
-The engine records `ORDER_RELEASED`, `URGENT_ORDER_RECEIVED`, and `ORDER_DUE` events. An incomplete order records `ORDER_LATE` exactly once when its deadline is reached. Units completed at or before the deadline count as on-time; later fulfillment counts as late.
+The engine records `FINISHED_GOODS_RECEIVED` when Quality sends a unit to the warehouse and `ORDER_UNIT_ALLOCATED` when stock is assigned to an order. It also records `ORDER_RELEASED`, `URGENT_ORDER_RECEIVED`, and `ORDER_DUE`. An incomplete order records `ORDER_LATE` exactly once when its deadline is reached.
+
+Delivery timing uses the **allocation time**, not the manufacturing time. A unit made at minute 20 but assigned at minute 70 is on time only when minute 70 is at or before the order's deadline.
+
+### Warehouse and backlog accounting
+
+- `finished_goods_available`: warehouse units not yet assigned to an order
+- `finished_goods_allocated`: warehouse units already assigned to orders
+- `finished_goods_total`: every good unit represented by finished-goods accounting
+- `backlog_units`: unfulfilled units across released, incomplete orders
+- `backlog_orders`: released orders that still have an unfulfilled quantity
+
+The engine continuously enforces:
+
+```text
+finished_goods_total = finished_goods_available + finished_goods_allocated
+finished_goods_total = good_production
+```
+
+Supplier replenishment and raw-material purchasing are intentionally deferred to a later phase. This phase models only finished-goods storage and customer-order allocation.
 
 ### OTIF definition
 
@@ -235,10 +262,15 @@ The response contains a UUID, session controls, the initial simulation summary, 
   "summary": {
     "seed": 42,
     "simulated_minutes": 0,
+    "finished_goods_available": 0,
+    "finished_goods_allocated": 0,
+    "finished_goods_total": 0,
     "order_summary": {
       "orders_total": 4,
       "orders_released": 3,
       "orders_due": 0,
+      "backlog_units": 260,
+      "backlog_orders": 3,
       "otif": null
     }
   },
@@ -312,7 +344,7 @@ Run the complete test suite from the `plantops-core` directory:
 python -m unittest discover -s tests -v
 ```
 
-The tests cover deterministic replay, seeded urgent orders, allocation priority, deadlines, OTIF, incremental advancement, event cancellation, expedited repairs, intervention costs, production output, machine behavior, API health, input validation, and the complete session lifecycle.
+The tests cover deterministic replay, seeded urgent orders, FIFO warehouse allocation, backlog and inventory invariants, allocation priority and timing, deadlines, OTIF, incremental advancement, event cancellation, expedited repairs, intervention costs, production output, machine behavior, API health, input validation, and the complete session lifecycle.
 
 ## Project structure
 

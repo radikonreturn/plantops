@@ -10,6 +10,7 @@ from typing import Any
 from .model import (
     Buffer,
     EventRecord,
+    FinishedGoodsInventory,
     Machine,
     MachineState,
     OrderConfig,
@@ -68,10 +69,18 @@ class ProductionLineSimulation:
         self.rng = RandomStreams(seed)
         self.event_log: list[EventRecord] = []
         self._completion_recorded = False
-        self.buffers = {
-            buffer_id: Buffer(buffer_id, capacity)
+        self.buffers: dict[str, Buffer] = {
+            buffer_id: (
+                FinishedGoodsInventory(buffer_id, capacity)
+                if buffer_id == "finished"
+                else Buffer(buffer_id, capacity)
+            )
             for buffer_id, capacity in scenario.buffer_capacities.items()
         }
+        finished_goods = self.buffers["finished"]
+        if not isinstance(finished_goods, FinishedGoodsInventory):
+            raise ValueError("Scenario must define a finished-goods buffer")
+        self.finished_goods = finished_goods
         for unit_id in range(1, scenario.raw_material_units + 1):
             self.buffers["raw"].put(unit_id)
         self.machines: dict[str, Machine] = {}
@@ -82,7 +91,6 @@ class ProductionLineSimulation:
             previous_buffer = output
         self.orders: dict[str, OrderState] = {}
         self._urgent_order_id: str | None = None
-        self._allocated_order_units: set[int] = set()
         self._record("SIMULATION_STARTED", detail=f"seed={seed}")
         self._initialize_orders()
 
@@ -148,11 +156,12 @@ class ProductionLineSimulation:
     def _release_order(self, order: OrderState) -> None:
         if order.status != OrderStatus.PENDING:
             return
-        order.status = OrderStatus.ACTIVE
+        order.status = OrderStatus.LATE if order.was_late else OrderStatus.ACTIVE
         detail = self._order_event_detail(order)
         if order.id == self._urgent_order_id:
             self._record("URGENT_ORDER_RECEIVED", detail=detail)
         self._record("ORDER_RELEASED", detail=detail)
+        self._allocate_finished_goods()
 
     def _mark_order_due(self, order: OrderState) -> None:
         if order.due_reached:
@@ -161,7 +170,8 @@ class ProductionLineSimulation:
         self._record("ORDER_DUE", detail=f"order_id={order.id}")
         if order.remaining_quantity > 0:
             order.was_late = True
-            order.status = OrderStatus.LATE
+            if order.status != OrderStatus.PENDING:
+                order.status = OrderStatus.LATE
             self._record(
                 "ORDER_LATE",
                 detail=f"order_id={order.id};remaining={order.remaining_quantity}",
@@ -175,37 +185,43 @@ class ProductionLineSimulation:
             f"due_minute={order.due_minute:g};priority={order.priority}"
         )
 
-    def _allocate_good_unit(self, unit_id: int) -> None:
-        if unit_id in self._allocated_order_units:
-            raise RuntimeError(f"Unit {unit_id} was already allocated to an order")
-        candidates = [
-            order
-            for order in self.orders.values()
-            if order.status != OrderStatus.PENDING and order.remaining_quantity > 0
-        ]
-        if not candidates:
-            return
+    def _allocate_finished_goods(self) -> None:
+        """Allocate available warehouse units by order priority and unit FIFO."""
+        while self.finished_goods.available_unit_ids:
+            candidates = [
+                order
+                for order in self.orders.values()
+                if order.status != OrderStatus.PENDING
+                and order.remaining_quantity > 0
+            ]
+            if not candidates:
+                return
 
-        order = min(
-            candidates,
-            key=lambda candidate: (
-                candidate.due_minute,
-                -candidate.priority,
-                candidate.id,
-            ),
-        )
-        order.fulfilled_quantity += 1
-        if self.clock <= order.due_minute:
-            order.on_time_fulfilled_quantity += 1
-        else:
-            order.late_fulfilled_quantity += 1
-        self._allocated_order_units.add(unit_id)
-
-        if order.remaining_quantity == 0:
-            if order.was_late or order.late_fulfilled_quantity:
-                order.status = OrderStatus.COMPLETED_LATE
+            order = min(
+                candidates,
+                key=lambda candidate: (
+                    candidate.due_minute,
+                    -candidate.priority,
+                    candidate.id,
+                ),
+            )
+            unit_id = self.finished_goods.allocate_next(order.id)
+            order.fulfilled_quantity += 1
+            if self.clock <= order.due_minute:
+                order.on_time_fulfilled_quantity += 1
             else:
-                order.status = OrderStatus.COMPLETED_ON_TIME
+                order.late_fulfilled_quantity += 1
+            self._record(
+                "ORDER_UNIT_ALLOCATED",
+                unit_id=unit_id,
+                detail=f"order_id={order.id}",
+            )
+
+            if order.remaining_quantity == 0:
+                if order.was_late or order.late_fulfilled_quantity:
+                    order.status = OrderStatus.COMPLETED_LATE
+                else:
+                    order.status = OrderStatus.COMPLETED_ON_TIME
 
     def _try_start(self, machine: Machine) -> bool:
         if machine.state in {MachineState.RUNNING, MachineState.DOWN}:
@@ -257,7 +273,8 @@ class ProductionLineSimulation:
             self.buffers[machine.output_buffer].put(unit_id)
             self._record("PROCESS_COMPLETED", machine.config.id, unit_id)
             if machine.output_buffer == "finished":
-                self._allocate_good_unit(unit_id)
+                self._record("FINISHED_GOODS_RECEIVED", unit_id=unit_id)
+                self._allocate_finished_goods()
         if machine.config.failure_probability and self.rng.get(f"failure:{machine.config.id}").random() < machine.config.failure_probability:
             machine.state = MachineState.DOWN
             machine.failures += 1
@@ -398,6 +415,14 @@ class ProductionLineSimulation:
             }
         average_availability = sum(item["availability"] for item in machine_metrics.values()) / len(machine_metrics)
         average_performance = sum(item["performance"] for item in machine_metrics.values()) / len(machine_metrics)
+        finished_goods_available = self.finished_goods.available_size
+        finished_goods_allocated = self.finished_goods.allocated_size
+        finished_goods_total = self.finished_goods.size
+        order_summary = self._order_summary()
+        if finished_goods_total != finished_goods_available + finished_goods_allocated:
+            raise RuntimeError("Finished-goods accounting invariant was violated")
+        if finished_goods_allocated != order_summary["units_delivered"]:
+            raise RuntimeError("Finished-goods allocation accounting was violated")
         return {
             "seed": self.seed,
             "simulated_minutes": round(self.clock, 3),
@@ -407,9 +432,12 @@ class ProductionLineSimulation:
             "oee": round(average_availability * average_performance * quality, 4),
             "wip": sum(buffer.size for buffer_id, buffer in self.buffers.items() if buffer_id not in {"raw", "finished"}),
             "raw_material_remaining": self.buffers["raw"].size,
+            "finished_goods_available": finished_goods_available,
+            "finished_goods_allocated": finished_goods_allocated,
+            "finished_goods_total": finished_goods_total,
             "machine_metrics": machine_metrics,
             "event_counts": dict(sorted(Counter(event.kind for event in self.event_log).items())),
-            "order_summary": self._order_summary(),
+            "order_summary": order_summary,
         }
 
     def _order_summary(self) -> dict[str, Any]:
@@ -433,6 +461,11 @@ class ProductionLineSimulation:
             if due_orders
             else None
         )
+        backlog = [
+            order
+            for order in orders
+            if order.status != OrderStatus.PENDING and order.remaining_quantity > 0
+        ]
         return {
             "orders_total": len(orders),
             "orders_released": sum(
@@ -449,6 +482,8 @@ class ProductionLineSimulation:
                 order.on_time_fulfilled_quantity for order in orders
             ),
             "units_late": sum(order.late_fulfilled_quantity for order in orders),
+            "backlog_units": sum(order.remaining_quantity for order in backlog),
+            "backlog_orders": len(backlog),
             "otif": otif,
             "orders": [
                 {
