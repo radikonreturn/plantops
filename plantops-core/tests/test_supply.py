@@ -234,7 +234,7 @@ class SupplySimulationTests(unittest.TestCase):
             "max_lead_minutes": 0.5,
             "late_probability": 1.1,
             "max_delay_minutes": 0,
-            "unit_cost": 0,
+            "unit_cost": -0.1,
         }
 
         for field, value in invalid_values.items():

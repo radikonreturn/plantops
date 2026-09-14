@@ -124,16 +124,20 @@ class SupplierConfig:
             isinstance(self.max_delay_minutes, bool)
             or not isinstance(self.max_delay_minutes, (int, float))
             or not isfinite(self.max_delay_minutes)
-            or self.max_delay_minutes <= 0
+            or self.max_delay_minutes < 0
         ):
-            raise ValueError("Supplier maximum delay minutes must be a positive number")
+            raise ValueError("Supplier maximum delay minutes cannot be negative")
+        if self.late_probability > 0 and self.max_delay_minutes == 0:
+            raise ValueError(
+                "Supplier maximum delay minutes must be positive when late deliveries are possible"
+            )
         if (
             isinstance(self.unit_cost, bool)
             or not isinstance(self.unit_cost, (int, float))
             or not isfinite(self.unit_cost)
-            or self.unit_cost <= 0
+            or self.unit_cost < 0
         ):
-            raise ValueError("Supplier unit cost must be a positive number")
+            raise ValueError("Supplier unit cost cannot be negative")
 
 
 @dataclass(frozen=True)
