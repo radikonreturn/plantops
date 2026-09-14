@@ -238,6 +238,7 @@ Sessions and player actions are an in-memory MVP. They are lost when the API pro
 | `POST` | `/sessions/{session_id}/resume` | Resume the session |
 | `PUT` | `/sessions/{session_id}/speed` | Set playback speed to `1`, `2`, or `4` |
 | `POST` | `/sessions/{session_id}/actions/expedite-repair` | Immediately repair a DOWN machine |
+| `POST` | `/sessions/{session_id}/actions/prioritize-order` | Change an active order's priority |
 
 ### Create a session
 
@@ -321,6 +322,25 @@ curl -X POST \
 ```
 
 The action is allowed while a session is paused; pausing blocks only time advancement. An unknown session or machine returns HTTP `404`, a known machine that is not `DOWN` returns `409`, and an invalid request body returns `422`. Failed actions do not change the simulation or add cost.
+
+### Prioritize a customer order
+
+A player can change the priority of a released, incomplete order to an integer from `0` through `100`; a higher number means a higher priority. Pending orders and completed orders cannot be reprioritized. The action is allowed while the session is paused and does not add intervention cost.
+
+```bash
+curl -X POST \
+  http://127.0.0.1:8000/sessions/{session_id}/actions/prioritize-order \
+  -H "Content-Type: application/json" \
+  -d '{"order_id": "ORDER-002", "priority": 100}'
+```
+
+Priority affects future warehouse allocations only. Finished goods already allocated to an order are never reassigned. Each new allocation continues to rank eligible orders by:
+
+1. Earliest due minute
+2. Higher current priority when due minutes match
+3. Order ID as the final deterministic tie-breaker
+
+Raising one order's priority can therefore delay another order with the same due minute. Unknown sessions or orders return HTTP `404`, ineligible orders return `409`, and invalid request bodies or priorities outside `0`–`100` return `422`. Repeating the current priority is a successful no-op and creates no additional audit event.
 
 ## Deterministic by design
 

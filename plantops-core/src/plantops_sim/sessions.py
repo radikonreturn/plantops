@@ -105,6 +105,17 @@ class SessionManager:
             session.intervention_cost += EMERGENCY_REPAIR_CALLOUT_COST
             return self._snapshot(session)
 
+    def reprioritize_order(
+        self,
+        session_id: str,
+        order_id: str,
+        priority: int,
+    ) -> dict[str, Any]:
+        with self._lock:
+            session = self._require_session(session_id)
+            session.simulation.reprioritize_order(order_id, priority)
+            return self._snapshot(session)
+
     def _require_session(self, session_id: str) -> SimulationSession:
         try:
             return self._sessions[session_id]

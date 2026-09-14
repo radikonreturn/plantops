@@ -6,10 +6,13 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 from .engine import (
+    InvalidOrderPriorityError,
     MachineNotDownError,
+    OrderCannotBeReprioritizedError,
     PendingRepairEventError,
     ProductionLineSimulation,
     UnknownMachineError,
+    UnknownOrderError,
 )
 from .scenario import make_mvp_scenario
 from .sessions import SessionManager, SessionNotFoundError, SessionPausedError
@@ -41,6 +44,11 @@ class SessionSpeedRequest(BaseModel):
 
 class ExpediteRepairRequest(BaseModel):
     machine_id: str = Field(min_length=1)
+
+
+class PrioritizeOrderRequest(BaseModel):
+    order_id: str = Field(min_length=1)
+    priority: int = Field(strict=True, ge=0, le=100)
 
 
 @app.get("/health")
@@ -125,3 +133,25 @@ def expedite_repair(session_id: str, request: ExpediteRepairRequest) -> dict[str
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except (MachineNotDownError, PendingRepairEventError) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.post("/sessions/{session_id}/actions/prioritize-order")
+def prioritize_order(
+    session_id: str,
+    request: PrioritizeOrderRequest,
+) -> dict[str, Any]:
+    try:
+        return session_manager.reprioritize_order(
+            session_id,
+            request.order_id,
+            request.priority,
+        )
+    except (SessionNotFoundError, UnknownOrderError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except OrderCannotBeReprioritizedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except InvalidOrderPriorityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc

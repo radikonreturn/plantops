@@ -39,6 +39,25 @@ class PendingRepairEventError(SimulationDomainError):
         super().__init__(f"Machine '{machine_id}' has no pending repair event")
 
 
+class UnknownOrderError(SimulationDomainError):
+    def __init__(self, order_id: str) -> None:
+        super().__init__(f"Order '{order_id}' was not found")
+
+
+class OrderCannotBeReprioritizedError(SimulationDomainError):
+    def __init__(self, order_id: str, status: OrderStatus) -> None:
+        super().__init__(
+            f"Order '{order_id}' cannot be reprioritized while {status.value}"
+        )
+
+
+class InvalidOrderPriorityError(SimulationDomainError):
+    def __init__(self, priority: object) -> None:
+        super().__init__(
+            f"Order priority must be an integer from 0 through 100; got {priority!r}"
+        )
+
+
 class RandomStreams:
     """Stable named PRNG streams; Python's randomized hash is never used."""
 
@@ -311,6 +330,29 @@ class ProductionLineSimulation:
         del self._pending_repair_event_ids[machine.config.id]
         self._record("REPAIR_EXPEDITED", machine.config.id)
         self._repair_machine(machine)
+
+    def reprioritize_order(self, order_id: str, priority: int) -> None:
+        """Change the priority used for an order's future warehouse allocations."""
+        if type(priority) is not int or not 0 <= priority <= 100:
+            raise InvalidOrderPriorityError(priority)
+
+        order = self.orders.get(order_id)
+        if order is None:
+            raise UnknownOrderError(order_id)
+        if order.status == OrderStatus.PENDING or order.remaining_quantity == 0:
+            raise OrderCannotBeReprioritizedError(order.id, order.status)
+        if order.priority == priority:
+            return
+
+        old_priority = order.priority
+        order.priority = priority
+        self._record(
+            "ORDER_PRIORITY_CHANGED",
+            detail=(
+                f"order_id={order.id};old_priority={old_priority};"
+                f"new_priority={priority}"
+            ),
+        )
 
     def _resolve_machine(self, machine_id: str) -> Machine:
         normalized_id = machine_id.strip().casefold().replace("-", "_")

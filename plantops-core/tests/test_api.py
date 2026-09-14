@@ -282,6 +282,96 @@ class ApiTests(unittest.TestCase):
             "IDLE",
         )
 
+    def test_paused_session_can_reprioritize_without_changing_cost(self):
+        session = self.create_session()
+        session_id = session["session_id"]
+        self.client.post(f"/sessions/{session_id}/pause")
+
+        response = self.client.post(
+            f"/sessions/{session_id}/actions/prioritize-order",
+            json={"order_id": "ORDER-002", "priority": 100},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        updated = response.json()
+        self.assertTrue(updated["paused"])
+        self.assertEqual(updated["intervention_cost"], 0.0)
+        order = next(
+            order
+            for order in updated["summary"]["order_summary"]["orders"]
+            if order["id"] == "ORDER-002"
+        )
+        self.assertEqual(order["priority"], 100)
+        self.assertEqual(
+            updated["summary"]["event_counts"]["ORDER_PRIORITY_CHANGED"],
+            1,
+        )
+
+    def test_reprioritize_unknown_session_and_order_return_not_found(self):
+        unknown_session_id = "00000000-0000-0000-0000-000000000000"
+        unknown_session_response = self.client.post(
+            f"/sessions/{unknown_session_id}/actions/prioritize-order",
+            json={"order_id": "ORDER-002", "priority": 100},
+        )
+        self.assertEqual(unknown_session_response.status_code, 404)
+
+        session = self.create_session()
+        unknown_order_response = self.client.post(
+            f"/sessions/{session['session_id']}/actions/prioritize-order",
+            json={"order_id": "UNKNOWN", "priority": 100},
+        )
+        self.assertEqual(unknown_order_response.status_code, 404)
+        current = self.client.get(f"/sessions/{session['session_id']}").json()
+        self.assertEqual(current["event_digest"], session["event_digest"])
+        self.assertEqual(current["intervention_cost"], 0.0)
+
+    def test_pending_and_completed_order_reprioritization_returns_conflict(self):
+        session = self.create_session(failures_enabled=False)
+        session_id = session["session_id"]
+
+        pending_response = self.client.post(
+            f"/sessions/{session_id}/actions/prioritize-order",
+            json={"order_id": "ORDER-URGENT", "priority": 100},
+        )
+        self.assertEqual(pending_response.status_code, 409)
+        after_pending = self.client.get(f"/sessions/{session_id}").json()
+        self.assertEqual(after_pending["event_digest"], session["event_digest"])
+
+        advance_response = self.client.post(
+            f"/sessions/{session_id}/advance",
+            json={"minutes": 150},
+        )
+        self.assertEqual(advance_response.status_code, 200)
+        completed_response = self.client.post(
+            f"/sessions/{session_id}/actions/prioritize-order",
+            json={"order_id": "ORDER-001", "priority": 100},
+        )
+        self.assertEqual(completed_response.status_code, 409)
+        current = self.client.get(f"/sessions/{session_id}").json()
+        self.assertEqual(
+            current["event_digest"],
+            advance_response.json()["event_digest"],
+        )
+
+    def test_reprioritize_order_rejects_invalid_body_and_priority(self):
+        session_id = self.create_session()["session_id"]
+
+        for payload in (
+            {},
+            {"order_id": "", "priority": 50},
+            {"order_id": "ORDER-002"},
+            {"order_id": "ORDER-002", "priority": -1},
+            {"order_id": "ORDER-002", "priority": 101},
+            {"order_id": "ORDER-002", "priority": True},
+            {"order_id": "ORDER-002", "priority": 1.5},
+        ):
+            with self.subTest(payload=payload):
+                response = self.client.post(
+                    f"/sessions/{session_id}/actions/prioritize-order",
+                    json=payload,
+                )
+                self.assertEqual(response.status_code, 422)
+
     def test_expedite_repair_rejects_invalid_body(self):
         session_id = self.create_session()["session_id"]
 

@@ -3,6 +3,11 @@ from __future__ import annotations
 import unittest
 
 from plantops_sim import ProductionLineSimulation, make_mvp_scenario
+from plantops_sim.engine import (
+    InvalidOrderPriorityError,
+    OrderCannotBeReprioritizedError,
+    UnknownOrderError,
+)
 from plantops_sim.model import OrderConfig, Scenario, StageConfig, UrgentOrderRule
 
 
@@ -117,6 +122,133 @@ class OrderSimulationTests(unittest.TestCase):
 
         self.assertEqual(order_by_id(order_summary, "ORDER-A")["fulfilled_quantity"], 1)
         self.assertEqual(order_by_id(order_summary, "ORDER-B")["fulfilled_quantity"], 0)
+
+    def test_reprioritization_changes_only_the_next_equal_due_allocation(self):
+        scenario = make_controlled_order_scenario(
+            raw_material_units=2,
+            orders=(
+                OrderConfig("ORDER-A", 2, 0, 5, 1),
+                OrderConfig("ORDER-B", 2, 0, 5, 1),
+            ),
+        )
+        simulation = ProductionLineSimulation(scenario, seed=1)
+        simulation.advance_to(0.45)
+
+        self.assertEqual(
+            simulation.finished_goods.allocated_order_by_unit,
+            {1: "ORDER-A"},
+        )
+
+        simulation.reprioritize_order("ORDER-B", 100)
+        summary = simulation.advance_to(1)
+
+        self.assertEqual(
+            simulation.finished_goods.allocated_order_by_unit,
+            {1: "ORDER-A", 2: "ORDER-B"},
+        )
+        self.assertEqual(
+            order_by_id(summary["order_summary"], "ORDER-A")["fulfilled_quantity"],
+            1,
+        )
+        self.assertEqual(
+            order_by_id(summary["order_summary"], "ORDER-B")["fulfilled_quantity"],
+            1,
+        )
+
+    def test_earlier_due_date_still_beats_reprioritized_later_order(self):
+        scenario = make_controlled_order_scenario(
+            raw_material_units=1,
+            orders=(
+                OrderConfig("EARLIER", 1, 0, 4, 1),
+                OrderConfig("LATER", 1, 0, 5, 1),
+            ),
+        )
+        simulation = ProductionLineSimulation(scenario, seed=1)
+
+        simulation.reprioritize_order("LATER", 100)
+        summary = simulation.advance_to(1)
+
+        self.assertEqual(
+            order_by_id(summary["order_summary"], "EARLIER")["fulfilled_quantity"],
+            1,
+        )
+        self.assertEqual(
+            order_by_id(summary["order_summary"], "LATER")["fulfilled_quantity"],
+            0,
+        )
+
+    def test_priority_change_has_one_audit_event_and_repeat_is_no_op(self):
+        scenario = make_controlled_order_scenario(
+            raw_material_units=0,
+            orders=(OrderConfig("CUSTOMER", 1, 0, 5, 2),),
+        )
+        simulation = ProductionLineSimulation(scenario, seed=1)
+
+        simulation.reprioritize_order("CUSTOMER", 75)
+        first_digest = simulation.digest()
+        simulation.reprioritize_order("CUSTOMER", 75)
+
+        events = [
+            event
+            for event in simulation.event_log
+            if event.kind == "ORDER_PRIORITY_CHANGED"
+        ]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(
+            events[0].detail,
+            "order_id=CUSTOMER;old_priority=2;new_priority=75",
+        )
+        self.assertEqual(simulation.digest(), first_digest)
+
+    def test_pending_and_completed_orders_reject_reprioritization_without_mutation(self):
+        pending_scenario = make_controlled_order_scenario(
+            raw_material_units=0,
+            orders=(OrderConfig("PENDING", 1, 2, 5, 1),),
+        )
+        pending = ProductionLineSimulation(pending_scenario, seed=1)
+        pending_summary = pending.summary()
+        pending_digest = pending.digest()
+
+        with self.assertRaises(OrderCannotBeReprioritizedError):
+            pending.reprioritize_order("PENDING", 50)
+
+        self.assertEqual(pending.summary(), pending_summary)
+        self.assertEqual(pending.digest(), pending_digest)
+
+        completed_scenario = make_controlled_order_scenario(
+            raw_material_units=1,
+            orders=(OrderConfig("COMPLETED", 1, 0, 5, 1),),
+        )
+        completed = ProductionLineSimulation(completed_scenario, seed=1)
+        completed.advance_to(1)
+        completed_summary = completed.summary()
+        completed_digest = completed.digest()
+
+        with self.assertRaises(OrderCannotBeReprioritizedError):
+            completed.reprioritize_order("COMPLETED", 50)
+
+        self.assertEqual(completed.summary(), completed_summary)
+        self.assertEqual(completed.digest(), completed_digest)
+
+    def test_invalid_priority_and_unknown_order_use_domain_errors_without_mutation(self):
+        scenario = make_controlled_order_scenario(
+            raw_material_units=0,
+            orders=(OrderConfig("CUSTOMER", 1, 0, 5, 1),),
+        )
+        simulation = ProductionLineSimulation(scenario, seed=1)
+        original_summary = simulation.summary()
+        original_digest = simulation.digest()
+
+        for priority in (-1, 101, True, 1.5):
+            with self.subTest(priority=priority):
+                with self.assertRaises(InvalidOrderPriorityError):
+                    simulation.reprioritize_order("CUSTOMER", priority)
+
+        with self.assertRaises(UnknownOrderError):
+            simulation.reprioritize_order("UNKNOWN", 50)
+
+        self.assertEqual(simulation.summary(), original_summary)
+        self.assertEqual(simulation.digest(), original_digest)
 
     def test_incomplete_order_emits_order_late_exactly_once(self):
         scenario = make_controlled_order_scenario(
