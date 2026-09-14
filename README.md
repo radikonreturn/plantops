@@ -16,16 +16,18 @@ The repository now includes the first playable operator console in `plantops-web
 
 ## Playable web console
 
-Start the backend in one WSL terminal:
+Start both the FastAPI backend and Vite operator console together from WSL:
+
+```bash
+cd plantops-web
+npm install
+npm run dev:full
+```
+
+The combined command prefixes output as `API` and `WEB`, and stops the other process when either process exits. The existing `npm run dev` command remains Vite-only. To run the backend separately:
 
 ```bash
 cd plantops-core && source .venv/bin/activate && uvicorn plantops_sim.api:app --reload --port 8000
-```
-
-Start the Vite operator console in a second WSL terminal:
-
-```bash
-cd plantops-web && npm install && npm run dev
 ```
 
 Then open the browser console at <http://localhost:5173>. The API's interactive Swagger documentation remains at <http://127.0.0.1:8000/docs>.
