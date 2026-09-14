@@ -48,8 +48,8 @@ class OrderConfig:
             raise ValueError("Order quantity must be greater than zero")
         if self.release_minute < 0:
             raise ValueError("Order release minute cannot be negative")
-        if self.due_minute < 0:
-            raise ValueError("Order due minute cannot be negative")
+        if self.due_minute <= self.release_minute:
+            raise ValueError("Order due minute must be after its release minute")
 
 
 @dataclass(frozen=True)

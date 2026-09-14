@@ -256,21 +256,28 @@ class OrderSimulationTests(unittest.TestCase):
         self.assertEqual(after_release["order_summary"]["units_delivered"], 1)
         self.assertEqual(after_release["event_counts"]["URGENT_ORDER_RECEIVED"], 1)
 
-    def test_stock_allocated_after_deadline_counts_as_late(self):
+    def test_unit_produced_after_deadline_is_allocated_late(self):
         scenario = make_controlled_order_scenario(
             raw_material_units=1,
-            orders=(OrderConfig("LATE-RELEASE", 1, 2, 1, 1),),
+            orders=(OrderConfig("LATE-DELIVERY", 1, 0, 1, 1),),
+            cycle_minutes=0.3,
         )
         simulation = ProductionLineSimulation(scenario, seed=1)
-        manufactured = simulation.advance_to(1)
 
+        at_deadline = simulation.advance_to(1)
         allocated = simulation.advance_to(2)
 
-        self.assertEqual(manufactured["finished_goods_available"], 1)
-        order = order_by_id(allocated["order_summary"], "LATE-RELEASE")
+        self.assertEqual(at_deadline["good_production"], 0)
+        order = order_by_id(allocated["order_summary"], "LATE-DELIVERY")
         self.assertEqual(order["status"], "COMPLETED_LATE")
         self.assertEqual(allocated["order_summary"]["units_on_time"], 0)
         self.assertEqual(allocated["order_summary"]["units_late"], 1)
+
+    def test_order_due_minute_must_be_after_release_minute(self):
+        for due_minute in (1, 0.5):
+            with self.subTest(due_minute=due_minute):
+                with self.assertRaisesRegex(ValueError, "after its release minute"):
+                    OrderConfig("INVALID", 1, 1, due_minute, 1)
 
     def test_finished_goods_and_backlog_accounting_invariants(self):
         simulation = ProductionLineSimulation(make_mvp_scenario(), seed=42)
