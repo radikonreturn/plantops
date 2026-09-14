@@ -9,6 +9,7 @@ from .engine import (
     MAX_PURCHASE_QUANTITY,
     InvalidPurchaseQuantityError,
     InvalidOrderPriorityError,
+    MachineCannotStartPreventiveMaintenanceError,
     MachineNotDownError,
     OrderCannotBeReprioritizedError,
     PendingRepairEventError,
@@ -57,6 +58,10 @@ class PrioritizeOrderRequest(BaseModel):
 class PlacePurchaseOrderRequest(BaseModel):
     supplier_id: str = Field(min_length=1)
     quantity: int = Field(strict=True, ge=1, le=MAX_PURCHASE_QUANTITY)
+
+
+class StartPreventiveMaintenanceRequest(BaseModel):
+    machine_id: str = Field(min_length=1)
 
 
 @app.get("/health")
@@ -183,3 +188,19 @@ def place_purchase_order(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+
+
+@app.post("/sessions/{session_id}/actions/start-preventive-maintenance")
+def start_preventive_maintenance(
+    session_id: str,
+    request: StartPreventiveMaintenanceRequest,
+) -> dict[str, Any]:
+    try:
+        return session_manager.start_preventive_maintenance(
+            session_id,
+            request.machine_id,
+        )
+    except (SessionNotFoundError, UnknownMachineError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except MachineCannotStartPreventiveMaintenanceError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

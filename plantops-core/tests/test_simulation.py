@@ -164,7 +164,7 @@ class ProductionLineSimulationTests(unittest.TestCase):
 
         self.assertEqual(
             simulation.digest(),
-            "45bc487a77b346a46b7ebbe1163270d9863341613d9f1177e9378dade7bf3089",
+            "cde9c5acdf5c013482eaa43f8a0ca8e41452246dcbeb675971c0bd88f944030a",
         )
 
 

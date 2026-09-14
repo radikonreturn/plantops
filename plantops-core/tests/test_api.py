@@ -101,6 +101,7 @@ class ApiTests(unittest.TestCase):
         self.assertFalse(session["paused"])
         self.assertEqual(session["speed"], 1)
         self.assertEqual(session["intervention_cost"], 0.0)
+        self.assertEqual(session["preventive_maintenance_cost"], 0.0)
         self.assertEqual(session["summary"]["simulated_minutes"], 0)
         self.assertIn("order_summary", session["summary"])
         self.assertIn("finished_goods_available", session["summary"])
@@ -441,6 +442,96 @@ class ApiTests(unittest.TestCase):
             with self.subTest(payload=payload):
                 response = self.client.post(
                     f"/sessions/{session_id}/actions/place-purchase-order",
+                    json=payload,
+                )
+                self.assertEqual(response.status_code, 422)
+
+    def test_paused_session_can_start_preventive_maintenance(self):
+        session = self.create_session()
+        session_id = session["session_id"]
+        self.client.post(f"/sessions/{session_id}/pause")
+
+        response = self.client.post(
+            f"/sessions/{session_id}/actions/start-preventive-maintenance",
+            json={"machine_id": "CNC-01"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        updated = response.json()
+        self.assertTrue(updated["paused"])
+        self.assertEqual(updated["preventive_maintenance_cost"], 250.0)
+        self.assertEqual(updated["intervention_cost"], 0.0)
+        self.assertEqual(
+            updated["summary"]["machine_metrics"]["cnc_01"]["state"],
+            "PLANNED_MAINTENANCE",
+        )
+
+        duplicate = self.client.post(
+            f"/sessions/{session_id}/actions/start-preventive-maintenance",
+            json={"machine_id": "CNC-01"},
+        )
+        self.assertEqual(duplicate.status_code, 409)
+        current = self.client.get(f"/sessions/{session_id}").json()
+        self.assertEqual(current["preventive_maintenance_cost"], 250.0)
+        self.assertEqual(current["event_digest"], updated["event_digest"])
+
+    def test_preventive_maintenance_unknown_targets_return_not_found(self):
+        unknown_session_id = "00000000-0000-0000-0000-000000000000"
+        unknown_session = self.client.post(
+            f"/sessions/{unknown_session_id}/actions/start-preventive-maintenance",
+            json={"machine_id": "CNC-01"},
+        )
+        self.assertEqual(unknown_session.status_code, 404)
+
+        session = self.create_session()
+        unknown_machine = self.client.post(
+            f"/sessions/{session['session_id']}/actions/start-preventive-maintenance",
+            json={"machine_id": "UNKNOWN-01"},
+        )
+        self.assertEqual(unknown_machine.status_code, 404)
+        current = self.client.get(f"/sessions/{session['session_id']}").json()
+        self.assertEqual(current["preventive_maintenance_cost"], 0.0)
+        self.assertEqual(current["event_digest"], session["event_digest"])
+
+    def test_preventive_maintenance_rejects_running_and_down_machines(self):
+        running_session = self.create_session()
+        running_id = running_session["session_id"]
+        self.client.post(
+            f"/sessions/{running_id}/advance",
+            json={"minutes": 0.1},
+        )
+        running_response = self.client.post(
+            f"/sessions/{running_id}/actions/start-preventive-maintenance",
+            json={"machine_id": "CNC-01"},
+        )
+        self.assertEqual(running_response.status_code, 409)
+        self.assertEqual(
+            self.client.get(f"/sessions/{running_id}").json()[
+                "preventive_maintenance_cost"
+            ],
+            0.0,
+        )
+
+        down_session = self.create_failed_session()
+        down_response = self.client.post(
+            f"/sessions/{down_session['session_id']}/actions/start-preventive-maintenance",
+            json={"machine_id": "CNC-01"},
+        )
+        self.assertEqual(down_response.status_code, 409)
+        self.assertEqual(
+            self.client.get(f"/sessions/{down_session['session_id']}").json()[
+                "preventive_maintenance_cost"
+            ],
+            0.0,
+        )
+
+    def test_preventive_maintenance_rejects_invalid_body(self):
+        session_id = self.create_session()["session_id"]
+
+        for payload in ({}, {"machine_id": ""}):
+            with self.subTest(payload=payload):
+                response = self.client.post(
+                    f"/sessions/{session_id}/actions/start-preventive-maintenance",
                     json=payload,
                 )
                 self.assertEqual(response.status_code, 422)

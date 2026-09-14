@@ -169,6 +169,30 @@ class SupplySimulationTests(unittest.TestCase):
             second.summary()["supply_summary"]["purchase_orders"],
         )
 
+    def test_pending_purchase_does_not_shift_production_random_streams(self):
+        scenario = make_mvp_scenario(raw_material_units=20)
+        baseline = ProductionLineSimulation(scenario, seed=77)
+        purchasing = ProductionLineSimulation(scenario, seed=77)
+
+        purchasing.place_purchase_order("STEEL-01", 10)
+        baseline.advance_to(30)
+        purchasing.advance_to(30)
+
+        production_events_with_purchase = [
+            event
+            for event in purchasing.event_log
+            if event.kind != "PURCHASE_ORDER_PLACED"
+        ]
+        self.assertEqual(production_events_with_purchase, baseline.event_log)
+        self.assertEqual(
+            purchasing.summary()["machine_metrics"],
+            baseline.summary()["machine_metrics"],
+        )
+        self.assertEqual(
+            purchasing.summary()["order_summary"],
+            baseline.summary()["order_summary"],
+        )
+
     def test_forced_late_delivery_emits_one_late_event(self):
         simulation = ProductionLineSimulation(
             make_supply_scenario(

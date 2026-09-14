@@ -12,6 +12,7 @@ class MachineState(StrEnum):
     BLOCKED = "BLOCKED"
     STARVED = "STARVED"
     DOWN = "DOWN"
+    PLANNED_MAINTENANCE = "PLANNED_MAINTENANCE"
 
 
 class OrderStatus(StrEnum):
@@ -38,6 +39,28 @@ class StageConfig:
     repair_min_minutes: float = 0.0
     repair_max_minutes: float = 0.0
     scrap_probability: float = 0.0
+    health_loss_per_processed_unit: float = 0.0
+    wear_based_failure_multiplier: float = 0.0
+    preventive_maintenance_duration: float = 0.0
+    preventive_maintenance_cost: float = 0.0
+
+    def __post_init__(self) -> None:
+        maintenance_fields = (
+            ("health loss per processed unit", self.health_loss_per_processed_unit),
+            ("wear-based failure multiplier", self.wear_based_failure_multiplier),
+            ("preventive-maintenance duration", self.preventive_maintenance_duration),
+            ("preventive-maintenance cost", self.preventive_maintenance_cost),
+        )
+        for field_name, value in maintenance_fields:
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not isfinite(value)
+                or value < 0
+            ):
+                raise ValueError(
+                    f"Stage {field_name} must be a finite, non-negative number"
+                )
 
 
 @dataclass(frozen=True)
@@ -258,6 +281,10 @@ class Machine:
     processed_units: int = 0
     scrap_units: int = 0
     failures: int = 0
+    health: float = 100.0
+    maintenance_count: int = 0
+    planned_maintenance_minutes: float = 0.0
+    active_maintenance_start_minute: float | None = None
 
 
 @dataclass(frozen=True)

@@ -40,6 +40,7 @@ The MVP scenario includes:
 - Customer orders, seeded urgent demand, delivery status, and OTIF performance
 - FIFO finished-goods inventory with warehouse and backlog accounting
 - Player-initiated steel-blank purchasing with deterministic supplier receipts
+- Machine health, wear-driven failure risk, and preventive maintenance
 
 ## WSL quick start
 
@@ -129,7 +130,7 @@ Example response (abridged):
     "good_production": 193,
     "scrap": 7,
     "quality": 0.965,
-    "oee": 0.9135,
+    "oee": 0.8649,
     "wip": 0,
     "raw_material_remaining": 0,
     "finished_goods_available": 0,
@@ -139,12 +140,16 @@ Example response (abridged):
       "cnc_01": {
         "state": "STARVED",
         "processed": 200,
-        "failures": 8,
-        "availability": 0.7879
+        "failures": 16,
+        "health": 40.0,
+        "maintenance_count": 0,
+        "planned_maintenance_minutes": 0.0,
+        "unplanned_downtime_minutes": 198.519,
+        "availability": 0.5864
       }
     },
     "event_counts": {
-      "MACHINE_FAILED": 8,
+      "MACHINE_FAILED": 16,
       "ORDER_DUE": 4,
       "ORDER_LATE": 3,
       "PROCESS_COMPLETED": 793,
@@ -158,8 +163,8 @@ Example response (abridged):
       "orders_late": 3,
       "units_ordered": 308,
       "units_delivered": 193,
-      "units_on_time": 152,
-      "units_late": 41,
+      "units_on_time": 110,
+      "units_late": 83,
       "backlog_units": 115,
       "backlog_orders": 2,
       "otif": 0.25,
@@ -177,7 +182,7 @@ Example response (abridged):
       "purchase_orders": []
     }
   },
-  "event_digest": "45bc487a77b346a46b7ebbe1163270d9863341613d9f1177e9378dade7bf3089"
+  "event_digest": "cde9c5acdf5c013482eaa43f8a0ca8e41452246dcbeb675971c0bd88f944030a"
 }
 ```
 
@@ -240,6 +245,37 @@ Placing a purchase order commits its full cost but does not immediately increase
 
 Supplier material quality and multi-material bills of materials are later phases. This MVP replenishes only the single raw unit consumed by CNC.
 
+## Machine health and preventive maintenance
+
+Every machine starts at 100 health. Health falls deterministically after each processed unit and never drops below zero. CNC-01 currently loses 0.3 health per unit and has a wear multiplier of 2.0; the other stages use harmless zero-wear defaults.
+
+Wear raises the existing seeded failure probability without introducing another random draw:
+
+```text
+effective failure probability
+  = base probability × (1 + wear multiplier × (100 - health) / 100)
+```
+
+The result is capped at 1.0. A zero base probability therefore remains zero at every health level, so `failures_enabled=false` still guarantees no failures.
+
+CNC-01 preventive maintenance takes 20 simulated minutes and costs 250.00. It may begin while the machine is `IDLE`, `STARVED`, or `BLOCKED`, including while its session is paused. During maintenance its state is `PLANNED_MAINTENANCE`, it cannot process units, and the engine records start and completion events. Completion restores health to 100, increments `maintenance_count`, and returns the machine to service.
+
+Machine metrics keep planned maintenance separate from failure downtime:
+
+- `health`: current health from 0 through 100
+- `maintenance_count`: completed preventive-maintenance actions
+- `planned_maintenance_minutes`: elapsed planned-maintenance time
+- `unplanned_downtime_minutes`: downtime caused by failures; legacy `down_minutes` remains the same value
+
+OEE availability uses standard planned-production-time treatment:
+
+```text
+planned production time = elapsed time - planned maintenance time
+availability = (planned production time - unplanned downtime) / planned production time
+```
+
+When planned production time is zero, availability is safely reported as `0.0`. Preventive maintenance trades predictable short-term production loss and a fixed cost for restored health and lower future breakdown risk; waiting preserves output now but exposes the line to increasingly frequent, unpredictable failures.
+
 ### OTIF definition
 
 OTIF measures orders delivered **on time and in full**:
@@ -274,6 +310,7 @@ Sessions and player actions are an in-memory MVP. They are lost when the API pro
 | `POST` | `/sessions/{session_id}/actions/expedite-repair` | Immediately repair a DOWN machine |
 | `POST` | `/sessions/{session_id}/actions/prioritize-order` | Change an active order's priority |
 | `POST` | `/sessions/{session_id}/actions/place-purchase-order` | Order raw material from a supplier |
+| `POST` | `/sessions/{session_id}/actions/start-preventive-maintenance` | Start planned maintenance on an eligible machine |
 
 ### Create a session
 
@@ -295,6 +332,7 @@ The response contains a UUID, session controls, the initial simulation summary, 
   "paused": false,
   "speed": 1,
   "intervention_cost": 0.0,
+  "preventive_maintenance_cost": 0.0,
   "summary": {
     "seed": 42,
     "simulated_minutes": 0,
@@ -398,6 +436,21 @@ curl -X POST \
 
 The returned session snapshot immediately shows the order as `OPEN`, its promised receipt minute, 100 `inbound_units`, and 1,850.00 of committed procurement cost. Raw stock changes only when simulation time reaches the deterministic actual receipt. Unknown sessions or suppliers return HTTP `404`; invalid bodies or quantities return `422`.
 
+### Start preventive maintenance
+
+Start the configured maintenance plan for an eligible machine:
+
+```bash
+curl -X POST \
+  http://127.0.0.1:8000/sessions/{session_id}/actions/start-preventive-maintenance \
+  -H "Content-Type: application/json" \
+  -d '{"machine_id": "CNC-01"}'
+```
+
+The action is allowed while the session is paused. CNC-01 immediately enters `PLANNED_MAINTENANCE`, and the session's separate `preventive_maintenance_cost` increases by 250.00 exactly once. `intervention_cost` remains reserved for emergency repair call-outs.
+
+Unknown sessions or machines return HTTP `404`. A machine that is `RUNNING`, `DOWN`, or already in planned maintenance returns `409`; malformed bodies return `422`. Failed starts do not change machine state, the event digest, or either cost ledger.
+
 ## Deterministic by design
 
 Each source of randomness uses a stable, named pseudo-random stream derived from the selected seed. Running the same scenario with the same seed and duration produces the same summary and event digest. This makes PlantOps useful for regression tests, scenario comparisons, and reproducible experiments.
@@ -420,7 +473,7 @@ Run the complete test suite from the `plantops-core` directory:
 python -m unittest discover -s tests -v
 ```
 
-The tests cover deterministic replay, seeded urgent orders, FIFO warehouse allocation, backlog and inventory invariants, allocation priority and timing, supplier lead times, purchasing, material receipts, starvation recovery, deadlines, OTIF, incremental advancement, event cancellation, expedited repairs, intervention costs, production output, machine behavior, API health, input validation, and the complete session lifecycle.
+The tests cover deterministic replay, machine health and wear, preventive maintenance, OEE downtime treatment, seeded urgent orders, FIFO warehouse allocation, backlog and inventory invariants, allocation priority and timing, supplier lead times, purchasing, material receipts, starvation recovery, deadlines, OTIF, incremental advancement, event cancellation, expedited repairs, intervention costs, production output, machine behavior, API health, input validation, and the complete session lifecycle.
 
 ## Project structure
 
@@ -435,6 +488,7 @@ plantops-core/
 │   └── sessions.py     # In-memory stateful session manager
 ├── tests/
 │   ├── test_api.py
+│   ├── test_maintenance.py
 │   ├── test_orders.py
 │   ├── test_simulation.py
 │   └── test_supply.py

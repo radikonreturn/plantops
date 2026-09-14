@@ -20,6 +20,10 @@ def make_mvp_scenario(
         StageConfig(
             id="cnc_01", name="CNC-01", ideal_cycle_minutes=1.35, cycle_jitter=0.15,
             failure_probability=cnc_failure_probability, repair_min_minutes=7, repair_max_minutes=18,
+            health_loss_per_processed_unit=0.3,
+            wear_based_failure_multiplier=2.0,
+            preventive_maintenance_duration=20,
+            preventive_maintenance_cost=250,
         ),
         StageConfig(id="wash_01", name="Yıkama-01", ideal_cycle_minutes=0.72, cycle_jitter=0.08),
         StageConfig(id="assembly_01", name="Montaj-01", ideal_cycle_minutes=1.08, cycle_jitter=0.12),

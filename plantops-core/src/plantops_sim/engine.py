@@ -77,6 +77,14 @@ class InvalidPurchaseQuantityError(SimulationDomainError):
         )
 
 
+class MachineCannotStartPreventiveMaintenanceError(SimulationDomainError):
+    def __init__(self, machine_id: str, state: MachineState) -> None:
+        super().__init__(
+            f"Machine '{machine_id}' cannot start preventive maintenance "
+            f"while {state.value}"
+        )
+
+
 class RandomStreams:
     """Stable named PRNG streams; Python's randomized hash is never used."""
 
@@ -104,6 +112,7 @@ class ProductionLineSimulation:
         ] = []
         self._cancelled_event_ids: set[int] = set()
         self._pending_repair_event_ids: dict[str, int] = {}
+        self._pending_maintenance_event_ids: dict[str, int] = {}
         self.rng = RandomStreams(seed)
         self.event_log: list[EventRecord] = []
         self._completion_recorded = False
@@ -270,7 +279,11 @@ class ProductionLineSimulation:
                     order.status = OrderStatus.COMPLETED_ON_TIME
 
     def _try_start(self, machine: Machine) -> bool:
-        if machine.state in {MachineState.RUNNING, MachineState.DOWN}:
+        if machine.state in {
+            MachineState.RUNNING,
+            MachineState.DOWN,
+            MachineState.PLANNED_MAINTENANCE,
+        }:
             return False
         input_buffer = self.buffers[machine.input_buffer]
         output_buffer = self.buffers[machine.output_buffer]
@@ -310,6 +323,10 @@ class ProductionLineSimulation:
         )
         machine.run_minutes += elapsed
         machine.processed_units += 1
+        machine.health = max(
+            0.0,
+            machine.health - machine.config.health_loss_per_processed_unit,
+        )
         machine.busy_unit = None
         machine.state = MachineState.IDLE
         if machine.config.scrap_probability and self.rng.get(f"scrap:{machine.config.id}").random() < machine.config.scrap_probability:
@@ -321,7 +338,12 @@ class ProductionLineSimulation:
             if machine.output_buffer == "finished":
                 self._record("FINISHED_GOODS_RECEIVED", unit_id=unit_id)
                 self._allocate_finished_goods()
-        if machine.config.failure_probability and self.rng.get(f"failure:{machine.config.id}").random() < machine.config.failure_probability:
+        failure_probability = self._effective_failure_probability(machine)
+        if (
+            failure_probability
+            and self.rng.get(f"failure:{machine.config.id}").random()
+            < failure_probability
+        ):
             machine.state = MachineState.DOWN
             machine.failures += 1
             repair = self.rng.get(f"repair:{machine.config.id}").uniform(
@@ -334,6 +356,18 @@ class ProductionLineSimulation:
                 machine.config.id,
             )
             self._pending_repair_event_ids[machine.config.id] = repair_event_id
+
+    @staticmethod
+    def _effective_failure_probability(machine: Machine) -> float:
+        wear_fraction = (100.0 - machine.health) / 100.0
+        multiplier = 1.0 + (
+            machine.config.wear_based_failure_multiplier * wear_fraction
+        )
+        return min(1.0, machine.config.failure_probability * multiplier)
+
+    def effective_failure_probability(self, machine_id: str) -> float:
+        """Return the machine's current health-adjusted failure probability."""
+        return self._effective_failure_probability(self._resolve_machine(machine_id))
 
     def _repair_machine(self, machine: Machine) -> None:
         if machine.state != MachineState.DOWN:
@@ -357,6 +391,58 @@ class ProductionLineSimulation:
         del self._pending_repair_event_ids[machine.config.id]
         self._record("REPAIR_EXPEDITED", machine.config.id)
         self._repair_machine(machine)
+
+    def preventive_maintenance_cost(self, machine_id: str) -> float:
+        """Return the configured cost for one preventive-maintenance action."""
+        return self._resolve_machine(machine_id).config.preventive_maintenance_cost
+
+    def start_preventive_maintenance(self, machine_id: str) -> None:
+        """Stop an eligible machine for its configured preventive maintenance."""
+        machine = self._resolve_machine(machine_id)
+        if machine.state not in {
+            MachineState.IDLE,
+            MachineState.STARVED,
+            MachineState.BLOCKED,
+        }:
+            raise MachineCannotStartPreventiveMaintenanceError(
+                machine.config.name,
+                machine.state,
+            )
+
+        duration = machine.config.preventive_maintenance_duration
+        machine.state = MachineState.PLANNED_MAINTENANCE
+        machine.active_maintenance_start_minute = self.clock
+        self._record(
+            "PLANNED_MAINTENANCE_STARTED",
+            machine.config.id,
+            detail=(
+                f"duration={duration:g};"
+                f"cost={machine.config.preventive_maintenance_cost:.2f};"
+                f"health={machine.health:g}"
+            ),
+        )
+        event_id = self._schedule(
+            self.clock + duration,
+            "PLANNED_MAINTENANCE_COMPLETED",
+            machine.config.id,
+        )
+        self._pending_maintenance_event_ids[machine.config.id] = event_id
+
+    def _complete_preventive_maintenance(self, machine: Machine) -> None:
+        if (
+            machine.state != MachineState.PLANNED_MAINTENANCE
+            or machine.active_maintenance_start_minute is None
+        ):
+            return
+
+        machine.planned_maintenance_minutes += (
+            machine.config.preventive_maintenance_duration
+        )
+        machine.active_maintenance_start_minute = None
+        machine.health = 100.0
+        machine.maintenance_count += 1
+        machine.state = MachineState.IDLE
+        self._record("PLANNED_MAINTENANCE_COMPLETED", machine.config.id)
 
     def reprioritize_order(self, order_id: str, priority: int) -> None:
         """Change the priority used for an order's future warehouse allocations."""
@@ -510,6 +596,17 @@ class ProductionLineSimulation:
             effective_down += self.clock - failure.time
         return effective_down
 
+    def _effective_planned_maintenance_minutes(self, machine: Machine) -> float:
+        effective_planned_maintenance = machine.planned_maintenance_minutes
+        if (
+            machine.state == MachineState.PLANNED_MAINTENANCE
+            and machine.active_maintenance_start_minute is not None
+        ):
+            effective_planned_maintenance += (
+                self.clock - machine.active_maintenance_start_minute
+            )
+        return effective_planned_maintenance
+
     def advance_to(self, until_minutes: float) -> dict[str, Any]:
         """Advance to an absolute simulation time while preserving all state."""
         if until_minutes < self.clock:
@@ -544,6 +641,16 @@ class ProductionLineSimulation:
             elif kind == "MATERIAL_RECEIVED":
                 assert target_id is not None
                 self._receive_material(self.purchase_orders[target_id])
+            elif kind == "PLANNED_MAINTENANCE_COMPLETED":
+                machine = self.machines[target_id] if target_id else None
+                assert machine is not None
+                if (
+                    self._pending_maintenance_event_ids.get(machine.config.id)
+                    != event_id
+                ):
+                    continue
+                del self._pending_maintenance_event_ids[machine.config.id]
+                self._complete_preventive_maintenance(machine)
             else:
                 raise RuntimeError(f"Unknown event type: {kind}")
             self._attempt_all_starts()
@@ -572,8 +679,18 @@ class ProductionLineSimulation:
         quality = good / total_quality if total_quality else 0.0
         machine_metrics = {}
         for machine_id, machine in self.machines.items():
-            down_minutes = self._effective_down_minutes(machine)
-            availability = max(0.0, (self.clock - down_minutes) / self.clock) if self.clock else 0.0
+            unplanned_downtime = self._effective_down_minutes(machine)
+            planned_maintenance = self._effective_planned_maintenance_minutes(machine)
+            planned_production_time = max(0.0, self.clock - planned_maintenance)
+            availability = (
+                max(
+                    0.0,
+                    (planned_production_time - unplanned_downtime)
+                    / planned_production_time,
+                )
+                if planned_production_time
+                else 0.0
+            )
             performance = min(1.0, (machine.config.ideal_cycle_minutes * machine.processed_units / machine.run_minutes)) if machine.run_minutes else 0.0
             machine_metrics[machine_id] = {
                 "state": machine.state.value,
@@ -581,7 +698,11 @@ class ProductionLineSimulation:
                 "scrap": machine.scrap_units,
                 "failures": machine.failures,
                 "run_minutes": round(machine.run_minutes, 3),
-                "down_minutes": round(down_minutes, 3),
+                "down_minutes": round(unplanned_downtime, 3),
+                "unplanned_downtime_minutes": round(unplanned_downtime, 3),
+                "planned_maintenance_minutes": round(planned_maintenance, 3),
+                "maintenance_count": machine.maintenance_count,
+                "health": round(machine.health, 3),
                 "availability": round(availability, 4),
                 "performance": round(performance, 4),
             }

@@ -30,6 +30,7 @@ class SimulationSession:
     paused: bool = False
     speed: int = 1
     intervention_cost: float = 0.0
+    preventive_maintenance_cost: float = 0.0
 
     def __post_init__(self) -> None:
         if type(self.speed) is not int or self.speed not in ALLOWED_SPEEDS:
@@ -105,6 +106,20 @@ class SessionManager:
             session.intervention_cost += EMERGENCY_REPAIR_CALLOUT_COST
             return self._snapshot(session)
 
+    def start_preventive_maintenance(
+        self,
+        session_id: str,
+        machine_id: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            session = self._require_session(session_id)
+            maintenance_cost = session.simulation.preventive_maintenance_cost(
+                machine_id
+            )
+            session.simulation.start_preventive_maintenance(machine_id)
+            session.preventive_maintenance_cost += maintenance_cost
+            return self._snapshot(session)
+
     def reprioritize_order(
         self,
         session_id: str,
@@ -145,6 +160,7 @@ class SessionManager:
             "paused": session.paused,
             "speed": session.speed,
             "intervention_cost": session.intervention_cost,
+            "preventive_maintenance_cost": session.preventive_maintenance_cost,
             "summary": session.simulation.summary(),
             "event_digest": session.simulation.digest(),
         }
