@@ -4,7 +4,10 @@ import unittest
 from unittest.mock import patch
 
 from plantops_sim import ProductionLineSimulation
-from plantops_sim.engine import MachineCannotStartPreventiveMaintenanceError
+from plantops_sim.engine import (
+    MachineCannotStartPreventiveMaintenanceError,
+    PreventiveMaintenanceNotConfiguredError,
+)
 from plantops_sim.model import Scenario, StageConfig
 from plantops_sim.sessions import SessionManager
 
@@ -51,6 +54,22 @@ def make_maintenance_scenario(
 
 
 class PreventiveMaintenanceTests(unittest.TestCase):
+    def test_unconfigured_machine_rejects_maintenance_without_mutation(self):
+        simulation = ProductionLineSimulation(
+            make_maintenance_scenario(raw_material_units=1),
+            seed=7,
+        )
+        summary_before = simulation.summary()
+        digest_before = simulation.digest()
+        events_before = list(simulation.event_log)
+
+        with self.assertRaises(PreventiveMaintenanceNotConfiguredError):
+            simulation.start_preventive_maintenance("WASH-01")
+
+        self.assertEqual(simulation.summary(), summary_before)
+        self.assertEqual(simulation.digest(), digest_before)
+        self.assertEqual(simulation.event_log, events_before)
+
     def test_health_decreases_deterministically_after_production(self):
         scenario = make_maintenance_scenario(raw_material_units=3)
         first = ProductionLineSimulation(scenario, seed=7)

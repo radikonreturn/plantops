@@ -258,7 +258,7 @@ effective failure probability
 
 The result is capped at 1.0. A zero base probability therefore remains zero at every health level, so `failures_enabled=false` still guarantees no failures.
 
-CNC-01 preventive maintenance takes 20 simulated minutes and costs 250.00. It may begin while the machine is `IDLE`, `STARVED`, or `BLOCKED`, including while its session is paused. During maintenance its state is `PLANNED_MAINTENANCE`, it cannot process units, and the engine records start and completion events. Completion restores health to 100, increments `maintenance_count`, and returns the machine to service.
+CNC-01 is the only preventive-maintenance-enabled machine in the current MVP. Its maintenance takes 20 simulated minutes and costs 250.00. It may begin while the machine is `IDLE`, `STARVED`, or `BLOCKED`, including while its session is paused. During maintenance its state is `PLANNED_MAINTENANCE`, it cannot process units, and the engine records start and completion events. Completion restores health to 100, increments `maintenance_count`, and returns the machine to service. Wash, Assembly, and Quality reject the action because no preventive-maintenance duration is configured for them yet.
 
 Machine metrics keep planned maintenance separate from failure downtime:
 

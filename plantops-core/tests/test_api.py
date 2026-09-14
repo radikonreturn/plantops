@@ -493,6 +493,21 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(current["preventive_maintenance_cost"], 0.0)
         self.assertEqual(current["event_digest"], session["event_digest"])
 
+    def test_unconfigured_preventive_maintenance_returns_conflict(self):
+        session = self.create_session()
+
+        response = self.client.post(
+            f"/sessions/{session['session_id']}/actions/start-preventive-maintenance",
+            json={"machine_id": "WASH-01"},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("no preventive maintenance configured", response.json()["detail"])
+        current = self.client.get(f"/sessions/{session['session_id']}").json()
+        self.assertEqual(current["summary"], session["summary"])
+        self.assertEqual(current["event_digest"], session["event_digest"])
+        self.assertEqual(current["preventive_maintenance_cost"], 0.0)
+
     def test_preventive_maintenance_rejects_running_and_down_machines(self):
         running_session = self.create_session()
         running_id = running_session["session_id"]

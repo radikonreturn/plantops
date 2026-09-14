@@ -13,6 +13,7 @@ from .engine import (
     MachineNotDownError,
     OrderCannotBeReprioritizedError,
     PendingRepairEventError,
+    PreventiveMaintenanceNotConfiguredError,
     ProductionLineSimulation,
     UnknownMachineError,
     UnknownOrderError,
@@ -202,5 +203,8 @@ def start_preventive_maintenance(
         )
     except (SessionNotFoundError, UnknownMachineError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except MachineCannotStartPreventiveMaintenanceError as exc:
+    except (
+        MachineCannotStartPreventiveMaintenanceError,
+        PreventiveMaintenanceNotConfiguredError,
+    ) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

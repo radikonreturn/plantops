@@ -85,6 +85,13 @@ class MachineCannotStartPreventiveMaintenanceError(SimulationDomainError):
         )
 
 
+class PreventiveMaintenanceNotConfiguredError(SimulationDomainError):
+    def __init__(self, machine_id: str) -> None:
+        super().__init__(
+            f"Machine '{machine_id}' has no preventive maintenance configured"
+        )
+
+
 class RandomStreams:
     """Stable named PRNG streams; Python's randomized hash is never used."""
 
@@ -399,6 +406,8 @@ class ProductionLineSimulation:
     def start_preventive_maintenance(self, machine_id: str) -> None:
         """Stop an eligible machine for its configured preventive maintenance."""
         machine = self._resolve_machine(machine_id)
+        if machine.config.preventive_maintenance_duration <= 0:
+            raise PreventiveMaintenanceNotConfiguredError(machine.config.name)
         if machine.state not in {
             MachineState.IDLE,
             MachineState.STARVED,
