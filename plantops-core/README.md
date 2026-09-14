@@ -37,6 +37,7 @@ The MVP scenario includes:
 - OEE, availability, performance, WIP, downtime, and production metrics
 - A SHA-256 event digest for reproducibility checks
 - Independent in-memory simulation sessions with pause, resume, and speed controls
+- Customer orders, seeded urgent demand, delivery status, and OTIF performance
 
 ## WSL quick start
 
@@ -139,15 +140,61 @@ Example response (abridged):
     },
     "event_counts": {
       "MACHINE_FAILED": 10,
+      "ORDER_DUE": 4,
+      "ORDER_LATE": 3,
       "PROCESS_COMPLETED": 1041,
       "UNIT_SCRAPPED": 7
+    },
+    "order_summary": {
+      "orders_total": 4,
+      "orders_released": 4,
+      "orders_due": 4,
+      "orders_completed": 3,
+      "orders_late": 3,
+      "units_ordered": 308,
+      "units_delivered": 255,
+      "units_on_time": 196,
+      "units_late": 59,
+      "otif": 0.25,
+      "orders": []
     }
   },
-  "event_digest": "84f1db849486e5aa798eca697277bbf1fb83d2aea29714fc44afbd31f9081f88"
+  "event_digest": "2bb20a5fd90eda68d06327a1d3aa77a3e6d141cd7e01eac217bf3fee1c7f8fb6"
 }
 ```
 
 The API returns metrics for every machine and event type; they are shortened above for readability. The digest is deterministic for the same scenario, seed, duration, and engine version.
+
+## Customer orders and OTIF
+
+The MVP line produces one product family, so every good unit leaving Quality is allocated automatically to an active, incomplete customer order. Allocation never removes the unit from finished-production accounting: `good_production` remains the total number of good units made.
+
+Orders carry a quantity, release minute, due minute, and priority. The allocator uses this stable sequence:
+
+1. Earliest due minute
+2. Higher priority when due minutes match
+3. Order ID as the final deterministic tiebreaker
+
+Three normal orders are available at minute zero. One urgent order arrives later in the shift; its arrival minute and quantity come from a dedicated `orders:urgent` random stream derived from the simulation seed. Its deadline is 70 minutes after arrival. The same seed therefore reproduces the same urgent order without changing the random streams used for machine cycles, failures, repairs, or scrap.
+
+The engine records `ORDER_RELEASED`, `URGENT_ORDER_RECEIVED`, and `ORDER_DUE` events. An incomplete order records `ORDER_LATE` exactly once when its deadline is reached. Units completed at or before the deadline count as on-time; later fulfillment counts as late.
+
+### OTIF definition
+
+OTIF measures orders delivered **on time and in full**:
+
+```text
+OTIF = orders fully completed by their deadline / orders whose due time has passed
+```
+
+Orders that are not due yet are excluded from both sides. When no order has become due, `otif` is `null` instead of an artificial zero or perfect score.
+
+Each item in `order_summary.orders` includes:
+
+- `id`, `quantity`, and `priority`
+- `release_minute` and `due_minute`
+- `fulfilled_quantity` and `remaining_quantity`
+- Current status: `PENDING`, `ACTIVE`, `LATE`, `COMPLETED_ON_TIME`, or `COMPLETED_LATE`
 
 ## Stateful simulation sessions
 
@@ -187,7 +234,13 @@ The response contains a UUID, session controls, the initial simulation summary, 
   "intervention_cost": 0.0,
   "summary": {
     "seed": 42,
-    "simulated_minutes": 0
+    "simulated_minutes": 0,
+    "order_summary": {
+      "orders_total": 4,
+      "orders_released": 3,
+      "orders_due": 0,
+      "otif": null
+    }
   },
   "event_digest": "<sha256>"
 }
@@ -259,7 +312,7 @@ Run the complete test suite from the `plantops-core` directory:
 python -m unittest discover -s tests -v
 ```
 
-The tests cover deterministic replay, incremental advancement, event cancellation, expedited repairs, intervention costs, seed variation, production output, failures and repairs, blocking, starvation, quality metrics, API health, input validation, and the complete session lifecycle.
+The tests cover deterministic replay, seeded urgent orders, allocation priority, deadlines, OTIF, incremental advancement, event cancellation, expedited repairs, intervention costs, production output, machine behavior, API health, input validation, and the complete session lifecycle.
 
 ## Project structure
 
@@ -274,6 +327,7 @@ plantops-core/
 │   └── sessions.py     # In-memory stateful session manager
 ├── tests/
 │   ├── test_api.py
+│   ├── test_orders.py
 │   └── test_simulation.py
 └── pyproject.toml
 ```

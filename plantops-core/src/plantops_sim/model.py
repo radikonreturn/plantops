@@ -12,6 +12,14 @@ class MachineState(StrEnum):
     DOWN = "DOWN"
 
 
+class OrderStatus(StrEnum):
+    PENDING = "PENDING"
+    ACTIVE = "ACTIVE"
+    LATE = "LATE"
+    COMPLETED_ON_TIME = "COMPLETED_ON_TIME"
+    COMPLETED_LATE = "COMPLETED_LATE"
+
+
 @dataclass(frozen=True)
 class StageConfig:
     id: str
@@ -25,11 +33,84 @@ class StageConfig:
 
 
 @dataclass(frozen=True)
+class OrderConfig:
+    id: str
+    quantity: int
+    release_minute: float
+    due_minute: float
+    priority: int
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            raise ValueError("Order ID cannot be empty")
+        if self.quantity <= 0:
+            raise ValueError("Order quantity must be greater than zero")
+        if self.release_minute < 0:
+            raise ValueError("Order release minute cannot be negative")
+        if self.due_minute <= self.release_minute:
+            raise ValueError("Order due minute must be after its release minute")
+
+
+@dataclass(frozen=True)
+class UrgentOrderRule:
+    id: str
+    min_arrival_minute: int
+    max_arrival_minute: int
+    min_quantity: int
+    max_quantity: int
+    lead_time_minutes: float
+    priority: int
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            raise ValueError("Urgent order ID cannot be empty")
+        if self.min_arrival_minute < 0:
+            raise ValueError("Urgent order arrival minute cannot be negative")
+        if self.max_arrival_minute < self.min_arrival_minute:
+            raise ValueError("Urgent order arrival range is invalid")
+        if self.min_quantity <= 0 or self.max_quantity < self.min_quantity:
+            raise ValueError("Urgent order quantity range is invalid")
+        if self.lead_time_minutes <= 0:
+            raise ValueError("Urgent order lead time must be greater than zero")
+
+
+@dataclass(frozen=True)
 class Scenario:
     raw_material_units: int
     shift_minutes: float
     stages: tuple[StageConfig, ...]
-    buffer_capacities: dict[str, int]
+    buffer_capacities: dict[str, int | None]
+    orders: tuple[OrderConfig, ...] = ()
+    urgent_order_rule: UrgentOrderRule | None = None
+
+
+@dataclass
+class OrderState:
+    id: str
+    requested_quantity: int
+    release_minute: float
+    due_minute: float
+    priority: int
+    fulfilled_quantity: int = 0
+    on_time_fulfilled_quantity: int = 0
+    late_fulfilled_quantity: int = 0
+    status: OrderStatus = OrderStatus.PENDING
+    due_reached: bool = False
+    was_late: bool = False
+
+    @classmethod
+    def from_config(cls, config: OrderConfig) -> OrderState:
+        return cls(
+            id=config.id,
+            requested_quantity=config.quantity,
+            release_minute=config.release_minute,
+            due_minute=config.due_minute,
+            priority=config.priority,
+        )
+
+    @property
+    def remaining_quantity(self) -> int:
+        return self.requested_quantity - self.fulfilled_quantity
 
 
 @dataclass

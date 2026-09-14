@@ -7,7 +7,16 @@ from collections import Counter
 from dataclasses import asdict
 from typing import Any
 
-from .model import Buffer, EventRecord, Machine, MachineState, Scenario
+from .model import (
+    Buffer,
+    EventRecord,
+    Machine,
+    MachineState,
+    OrderConfig,
+    OrderState,
+    OrderStatus,
+    Scenario,
+)
 
 
 class SimulationDomainError(Exception):
@@ -51,7 +60,9 @@ class ProductionLineSimulation:
         self.seed = seed
         self.clock = 0.0
         self._sequence = 0
-        self._events: list[tuple[float, int, str, str | None, int | None]] = []
+        self._events: list[
+            tuple[float, int, int, str, str | None, int | None]
+        ] = []
         self._cancelled_event_ids: set[int] = set()
         self._pending_repair_event_ids: dict[str, int] = {}
         self.rng = RandomStreams(seed)
@@ -69,7 +80,11 @@ class ProductionLineSimulation:
             output = "finished" if index == len(scenario.stages) - 1 else f"after_{stage.id}"
             self.machines[stage.id] = Machine(stage, previous_buffer, output)
             previous_buffer = output
+        self.orders: dict[str, OrderState] = {}
+        self._urgent_order_id: str | None = None
+        self._allocated_order_units: set[int] = set()
         self._record("SIMULATION_STARTED", detail=f"seed={seed}")
+        self._initialize_orders()
 
     def _record(self, kind: str, machine_id: str | None = None, unit_id: int | None = None, detail: str = "") -> None:
         self.event_log.append(EventRecord(round(self.clock, 6), kind, machine_id, unit_id, detail))
@@ -78,15 +93,119 @@ class ProductionLineSimulation:
         self,
         time: float,
         kind: str,
-        machine_id: str | None = None,
+        target_id: str | None = None,
         unit_id: int | None = None,
+        *,
+        event_phase: int = 0,
     ) -> int:
         self._sequence += 1
-        heapq.heappush(self._events, (time, self._sequence, kind, machine_id, unit_id))
+        heapq.heappush(
+            self._events,
+            (time, event_phase, self._sequence, kind, target_id, unit_id),
+        )
         return self._sequence
 
     def _cancel_scheduled_event(self, event_id: int) -> None:
         self._cancelled_event_ids.add(event_id)
+
+    def _initialize_orders(self) -> None:
+        order_configs = list(self.scenario.orders)
+        if self.scenario.urgent_order_rule is not None:
+            rule = self.scenario.urgent_order_rule
+            urgent_rng = self.rng.get("orders:urgent")
+            arrival = float(
+                urgent_rng.randint(
+                    rule.min_arrival_minute,
+                    rule.max_arrival_minute,
+                )
+            )
+            urgent_order = OrderConfig(
+                id=rule.id,
+                quantity=urgent_rng.randint(rule.min_quantity, rule.max_quantity),
+                release_minute=arrival,
+                due_minute=arrival + rule.lead_time_minutes,
+                priority=rule.priority,
+            )
+            order_configs.append(urgent_order)
+            self._urgent_order_id = urgent_order.id
+
+        for config in order_configs:
+            if config.id in self.orders:
+                raise ValueError(f"Duplicate order ID: {config.id}")
+            order = OrderState.from_config(config)
+            self.orders[order.id] = order
+            self._schedule(
+                order.due_minute,
+                "ORDER_DUE",
+                order.id,
+                event_phase=1,
+            )
+            if order.release_minute <= self.clock:
+                self._release_order(order)
+            else:
+                self._schedule(order.release_minute, "ORDER_RELEASED", order.id)
+
+    def _release_order(self, order: OrderState) -> None:
+        if order.status != OrderStatus.PENDING:
+            return
+        order.status = OrderStatus.ACTIVE
+        detail = self._order_event_detail(order)
+        if order.id == self._urgent_order_id:
+            self._record("URGENT_ORDER_RECEIVED", detail=detail)
+        self._record("ORDER_RELEASED", detail=detail)
+
+    def _mark_order_due(self, order: OrderState) -> None:
+        if order.due_reached:
+            return
+        order.due_reached = True
+        self._record("ORDER_DUE", detail=f"order_id={order.id}")
+        if order.remaining_quantity > 0:
+            order.was_late = True
+            order.status = OrderStatus.LATE
+            self._record(
+                "ORDER_LATE",
+                detail=f"order_id={order.id};remaining={order.remaining_quantity}",
+            )
+
+    @staticmethod
+    def _order_event_detail(order: OrderState) -> str:
+        return (
+            f"order_id={order.id};quantity={order.requested_quantity};"
+            f"release_minute={order.release_minute:g};"
+            f"due_minute={order.due_minute:g};priority={order.priority}"
+        )
+
+    def _allocate_good_unit(self, unit_id: int) -> None:
+        if unit_id in self._allocated_order_units:
+            raise RuntimeError(f"Unit {unit_id} was already allocated to an order")
+        candidates = [
+            order
+            for order in self.orders.values()
+            if order.status != OrderStatus.PENDING and order.remaining_quantity > 0
+        ]
+        if not candidates:
+            return
+
+        order = min(
+            candidates,
+            key=lambda candidate: (
+                candidate.due_minute,
+                -candidate.priority,
+                candidate.id,
+            ),
+        )
+        order.fulfilled_quantity += 1
+        if self.clock <= order.due_minute:
+            order.on_time_fulfilled_quantity += 1
+        else:
+            order.late_fulfilled_quantity += 1
+        self._allocated_order_units.add(unit_id)
+
+        if order.remaining_quantity == 0:
+            if order.was_late or order.late_fulfilled_quantity:
+                order.status = OrderStatus.COMPLETED_LATE
+            else:
+                order.status = OrderStatus.COMPLETED_ON_TIME
 
     def _try_start(self, machine: Machine) -> bool:
         if machine.state in {MachineState.RUNNING, MachineState.DOWN}:
@@ -137,6 +256,8 @@ class ProductionLineSimulation:
         else:
             self.buffers[machine.output_buffer].put(unit_id)
             self._record("PROCESS_COMPLETED", machine.config.id, unit_id)
+            if machine.output_buffer == "finished":
+                self._allocate_good_unit(unit_id)
         if machine.config.failure_probability and self.rng.get(f"failure:{machine.config.id}").random() < machine.config.failure_probability:
             machine.state = MachineState.DOWN
             machine.failures += 1
@@ -212,21 +333,28 @@ class ProductionLineSimulation:
 
         self._attempt_all_starts()
         while self._events and self._events[0][0] <= until_minutes:
-            time, event_id, kind, machine_id, unit_id = heapq.heappop(self._events)
+            time, _, event_id, kind, target_id, unit_id = heapq.heappop(self._events)
             if event_id in self._cancelled_event_ids:
                 self._cancelled_event_ids.remove(event_id)
                 continue
             self.clock = time
-            machine = self.machines[machine_id] if machine_id else None
             if kind == "PROCESS_COMPLETED":
+                machine = self.machines[target_id] if target_id else None
                 assert machine is not None and unit_id is not None
                 self._complete_process(machine, unit_id)
             elif kind == "REPAIR_COMPLETED":
+                machine = self.machines[target_id] if target_id else None
                 assert machine is not None
                 if self._pending_repair_event_ids.get(machine.config.id) != event_id:
                     continue
                 del self._pending_repair_event_ids[machine.config.id]
                 self._repair_machine(machine)
+            elif kind == "ORDER_RELEASED":
+                assert target_id is not None
+                self._release_order(self.orders[target_id])
+            elif kind == "ORDER_DUE":
+                assert target_id is not None
+                self._mark_order_due(self.orders[target_id])
             else:
                 raise RuntimeError(f"Unknown event type: {kind}")
             self._attempt_all_starts()
@@ -281,6 +409,60 @@ class ProductionLineSimulation:
             "raw_material_remaining": self.buffers["raw"].size,
             "machine_metrics": machine_metrics,
             "event_counts": dict(sorted(Counter(event.kind for event in self.event_log).items())),
+            "order_summary": self._order_summary(),
+        }
+
+    def _order_summary(self) -> dict[str, Any]:
+        orders = sorted(
+            self.orders.values(),
+            key=lambda order: (
+                order.release_minute,
+                order.due_minute,
+                -order.priority,
+                order.id,
+            ),
+        )
+        due_orders = [order for order in orders if order.due_reached]
+        on_time_orders = [
+            order
+            for order in due_orders
+            if order.on_time_fulfilled_quantity == order.requested_quantity
+        ]
+        otif = (
+            round(len(on_time_orders) / len(due_orders), 4)
+            if due_orders
+            else None
+        )
+        return {
+            "orders_total": len(orders),
+            "orders_released": sum(
+                order.status != OrderStatus.PENDING for order in orders
+            ),
+            "orders_due": len(due_orders),
+            "orders_completed": sum(
+                order.remaining_quantity == 0 for order in orders
+            ),
+            "orders_late": sum(order.was_late for order in orders),
+            "units_ordered": sum(order.requested_quantity for order in orders),
+            "units_delivered": sum(order.fulfilled_quantity for order in orders),
+            "units_on_time": sum(
+                order.on_time_fulfilled_quantity for order in orders
+            ),
+            "units_late": sum(order.late_fulfilled_quantity for order in orders),
+            "otif": otif,
+            "orders": [
+                {
+                    "id": order.id,
+                    "quantity": order.requested_quantity,
+                    "fulfilled_quantity": order.fulfilled_quantity,
+                    "remaining_quantity": order.remaining_quantity,
+                    "release_minute": order.release_minute,
+                    "due_minute": order.due_minute,
+                    "priority": order.priority,
+                    "status": order.status.value,
+                }
+                for order in orders
+            ],
         }
 
     def digest(self) -> str:

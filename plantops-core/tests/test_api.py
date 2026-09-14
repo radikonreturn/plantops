@@ -92,6 +92,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(session["speed"], 1)
         self.assertEqual(session["intervention_cost"], 0.0)
         self.assertEqual(session["summary"]["simulated_minutes"], 0)
+        self.assertIn("order_summary", session["summary"])
         self.assertNotIn("simulation", session)
 
     def test_advance_changes_time_without_replacing_session(self):
