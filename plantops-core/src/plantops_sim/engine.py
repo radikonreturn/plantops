@@ -122,6 +122,18 @@ class ProductionLineSimulation:
         machine.state = MachineState.IDLE
         self._record("REPAIR_COMPLETED", machine.config.id)
 
+    def _effective_down_minutes(self, machine: Machine) -> float:
+        """Include an unfinished repair when the simulation stops mid-downtime."""
+        effective_down = machine.down_minutes
+        if machine.state == MachineState.DOWN:
+            failure = next(
+                event
+                for event in reversed(self.event_log)
+                if event.kind == "MACHINE_FAILED" and event.machine_id == machine.config.id
+            )
+            effective_down += self.clock - failure.time
+        return effective_down
+
     def run(self, until_minutes: float | None = None) -> dict[str, Any]:
         until = self.scenario.shift_minutes if until_minutes is None else until_minutes
         self._attempt_all_starts()
@@ -149,7 +161,8 @@ class ProductionLineSimulation:
         quality = good / total_quality if total_quality else 0.0
         machine_metrics = {}
         for machine_id, machine in self.machines.items():
-            availability = max(0.0, (self.clock - machine.down_minutes) / self.clock) if self.clock else 0.0
+            down_minutes = self._effective_down_minutes(machine)
+            availability = max(0.0, (self.clock - down_minutes) / self.clock) if self.clock else 0.0
             performance = min(1.0, (machine.config.ideal_cycle_minutes * machine.processed_units / machine.run_minutes)) if machine.run_minutes else 0.0
             machine_metrics[machine_id] = {
                 "state": machine.state.value,
@@ -157,7 +170,7 @@ class ProductionLineSimulation:
                 "scrap": machine.scrap_units,
                 "failures": machine.failures,
                 "run_minutes": round(machine.run_minutes, 3),
-                "down_minutes": round(machine.down_minutes, 3),
+                "down_minutes": round(down_minutes, 3),
                 "availability": round(availability, 4),
                 "performance": round(performance, 4),
             }
