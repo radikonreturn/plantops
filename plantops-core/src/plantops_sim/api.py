@@ -5,7 +5,12 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
-from .engine import ProductionLineSimulation
+from .engine import (
+    MachineNotDownError,
+    PendingRepairEventError,
+    ProductionLineSimulation,
+    UnknownMachineError,
+)
 from .scenario import make_mvp_scenario
 from .sessions import SessionManager, SessionNotFoundError, SessionPausedError
 
@@ -32,6 +37,10 @@ class AdvanceSessionRequest(BaseModel):
 
 class SessionSpeedRequest(BaseModel):
     speed: Literal[1, 2, 4]
+
+
+class ExpediteRepairRequest(BaseModel):
+    machine_id: str = Field(min_length=1)
 
 
 @app.get("/health")
@@ -106,3 +115,13 @@ def set_session_speed(session_id: str, request: SessionSpeedRequest) -> dict[str
         return session_manager.set_speed(session_id, request.speed)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.post("/sessions/{session_id}/actions/expedite-repair")
+def expedite_repair(session_id: str, request: ExpediteRepairRequest) -> dict[str, Any]:
+    try:
+        return session_manager.expedite_repair(session_id, request.machine_id)
+    except (SessionNotFoundError, UnknownMachineError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (MachineNotDownError, PendingRepairEventError) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

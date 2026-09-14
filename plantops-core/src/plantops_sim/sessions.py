@@ -10,6 +10,7 @@ from .scenario import make_mvp_scenario
 
 
 ALLOWED_SPEEDS = frozenset({1, 2, 4})
+EMERGENCY_REPAIR_CALLOUT_COST = 350.0
 
 
 class SessionNotFoundError(LookupError):
@@ -28,6 +29,7 @@ class SimulationSession:
     simulation: ProductionLineSimulation
     paused: bool = False
     speed: int = 1
+    intervention_cost: float = 0.0
 
     def __post_init__(self) -> None:
         if type(self.speed) is not int or self.speed not in ALLOWED_SPEEDS:
@@ -96,6 +98,13 @@ class SessionManager:
             session.simulation.advance_by(minutes)
             return self._snapshot(session)
 
+    def expedite_repair(self, session_id: str, machine_id: str) -> dict[str, Any]:
+        with self._lock:
+            session = self._require_session(session_id)
+            session.simulation.expedite_repair(machine_id)
+            session.intervention_cost += EMERGENCY_REPAIR_CALLOUT_COST
+            return self._snapshot(session)
+
     def _require_session(self, session_id: str) -> SimulationSession:
         try:
             return self._sessions[session_id]
@@ -113,6 +122,7 @@ class SessionManager:
             "session_id": session.session_id,
             "paused": session.paused,
             "speed": session.speed,
+            "intervention_cost": session.intervention_cost,
             "summary": session.simulation.summary(),
             "event_digest": session.simulation.digest(),
         }

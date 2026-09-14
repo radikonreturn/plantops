@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from plantops_sim import ProductionLineSimulation, make_mvp_scenario
+from plantops_sim.engine import MachineNotDownError, UnknownMachineError
 
 
 class ProductionLineSimulationTests(unittest.TestCase):
@@ -10,6 +11,16 @@ class ProductionLineSimulationTests(unittest.TestCase):
         scenario = make_mvp_scenario(**kwargs)
         simulation = ProductionLineSimulation(scenario, seed=seed)
         return simulation, simulation.run()
+
+    def make_failed_simulation(self, raw_material_units: int = 1):
+        scenario = make_mvp_scenario(
+            raw_material_units=raw_material_units,
+            cnc_failure_probability=1.0,
+        )
+        simulation = ProductionLineSimulation(scenario, seed=42)
+        simulation.advance_to(2)
+        self.assertEqual(simulation.summary()["machine_metrics"]["cnc_01"]["state"], "DOWN")
+        return simulation
 
     def test_same_seed_produces_same_summary_and_event_digest(self):
         first, first_result = self.run_simulation(77)
@@ -94,6 +105,67 @@ class ProductionLineSimulationTests(unittest.TestCase):
         simulation.run(90)
         simulation.run(90)
         self.assertEqual(simulation.summary()["event_counts"]["SIMULATION_COMPLETED"], 1)
+
+    def test_expedited_repair_returns_failed_machine_to_service_immediately(self):
+        simulation = self.make_failed_simulation(raw_material_units=2)
+        clock_before_action = simulation.clock
+
+        simulation.expedite_repair("CNC-01")
+
+        cnc = simulation.summary()["machine_metrics"]["cnc_01"]
+        self.assertEqual(simulation.clock, clock_before_action)
+        self.assertEqual(cnc["state"], "IDLE")
+        self.assertGreater(cnc["down_minutes"], 0)
+        self.assertEqual(simulation.event_log[-2].kind, "REPAIR_EXPEDITED")
+        self.assertEqual(simulation.event_log[-1].kind, "REPAIR_COMPLETED")
+
+        simulation.advance_by(0.1)
+        self.assertEqual(
+            simulation.summary()["machine_metrics"]["cnc_01"]["state"],
+            "RUNNING",
+        )
+
+    def test_expedited_repair_cancels_original_repair_completion(self):
+        simulation = self.make_failed_simulation()
+        simulation.expedite_repair("CNC-01")
+        expedited_downtime = simulation.summary()["machine_metrics"]["cnc_01"][
+            "down_minutes"
+        ]
+
+        simulation.advance_to(30)
+
+        event_counts = simulation.summary()["event_counts"]
+        self.assertEqual(event_counts["REPAIR_EXPEDITED"], 1)
+        self.assertEqual(event_counts["REPAIR_COMPLETED"], 1)
+
+        ordinary_repair = self.make_failed_simulation()
+        ordinary_repair.advance_to(30)
+        ordinary_downtime = ordinary_repair.summary()["machine_metrics"]["cnc_01"][
+            "down_minutes"
+        ]
+        self.assertLess(expedited_downtime, ordinary_downtime)
+
+    def test_invalid_expedite_attempts_do_not_change_state(self):
+        simulation = ProductionLineSimulation(make_mvp_scenario(), seed=42)
+        summary_before = simulation.summary()
+        digest_before = simulation.digest()
+
+        with self.assertRaisesRegex(UnknownMachineError, "was not found"):
+            simulation.expedite_repair("UNKNOWN-01")
+        with self.assertRaisesRegex(MachineNotDownError, "not DOWN"):
+            simulation.expedite_repair("CNC-01")
+
+        self.assertEqual(simulation.summary(), summary_before)
+        self.assertEqual(simulation.digest(), digest_before)
+
+    def test_no_intervention_preserves_reference_digest(self):
+        simulation = ProductionLineSimulation(make_mvp_scenario(), seed=42)
+        simulation.run(480)
+
+        self.assertEqual(
+            simulation.digest(),
+            "84f1db849486e5aa798eca697277bbf1fb83d2aea29714fc44afbd31f9081f88",
+        )
 
 
 if __name__ == "__main__":

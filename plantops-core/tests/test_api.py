@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 from uuid import UUID
 
 from fastapi.testclient import TestClient
 
+from plantops_sim import make_mvp_scenario
 from plantops_sim.api import app
 
 
@@ -60,12 +62,35 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return response.json()
 
+    def create_failed_session(self):
+        forced_failure_scenario = make_mvp_scenario(
+            raw_material_units=1,
+            cnc_failure_probability=1.0,
+        )
+        with patch(
+            "plantops_sim.sessions.make_mvp_scenario",
+            return_value=forced_failure_scenario,
+        ):
+            session = self.create_session()
+
+        response = self.client.post(
+            f"/sessions/{session['session_id']}/advance",
+            json={"minutes": 2},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["summary"]["machine_metrics"]["cnc_01"]["state"],
+            "DOWN",
+        )
+        return response.json()
+
     def test_create_session_returns_uuid_and_initial_state(self):
         session = self.create_session()
 
         UUID(session["session_id"])
         self.assertFalse(session["paused"])
         self.assertEqual(session["speed"], 1)
+        self.assertEqual(session["intervention_cost"], 0.0)
         self.assertEqual(session["summary"]["simulated_minutes"], 0)
         self.assertNotIn("simulation", session)
 
@@ -174,6 +199,91 @@ class ApiTests(unittest.TestCase):
             second_advanced["event_digest"],
         )
         self.assertEqual(first_advanced["summary"], second_advanced["summary"])
+
+    def test_invalid_expedite_returns_conflict_without_cost(self):
+        session = self.create_session()
+
+        response = self.client.post(
+            f"/sessions/{session['session_id']}/actions/expedite-repair",
+            json={"machine_id": "CNC-01"},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        current = self.client.get(f"/sessions/{session['session_id']}").json()
+        self.assertEqual(current["intervention_cost"], 0.0)
+        self.assertEqual(current["event_digest"], session["event_digest"])
+
+    def test_expedite_repair_adds_fixed_cost_once(self):
+        session = self.create_failed_session()
+        action_url = f"/sessions/{session['session_id']}/actions/expedite-repair"
+
+        response = self.client.post(action_url, json={"machine_id": "CNC-01"})
+
+        self.assertEqual(response.status_code, 200)
+        updated = response.json()
+        self.assertEqual(updated["intervention_cost"], 350.0)
+        self.assertEqual(
+            updated["summary"]["machine_metrics"]["cnc_01"]["state"],
+            "IDLE",
+        )
+
+        duplicate_response = self.client.post(
+            action_url,
+            json={"machine_id": "CNC-01"},
+        )
+        self.assertEqual(duplicate_response.status_code, 409)
+        self.assertEqual(
+            self.client.get(f"/sessions/{session['session_id']}").json()[
+                "intervention_cost"
+            ],
+            350.0,
+        )
+
+    def test_expedite_unknown_session_and_machine_return_not_found(self):
+        unknown_session_id = "00000000-0000-0000-0000-000000000000"
+        unknown_session_response = self.client.post(
+            f"/sessions/{unknown_session_id}/actions/expedite-repair",
+            json={"machine_id": "CNC-01"},
+        )
+        self.assertEqual(unknown_session_response.status_code, 404)
+
+        session = self.create_session()
+        unknown_machine_response = self.client.post(
+            f"/sessions/{session['session_id']}/actions/expedite-repair",
+            json={"machine_id": "UNKNOWN-01"},
+        )
+        self.assertEqual(unknown_machine_response.status_code, 404)
+        current = self.client.get(f"/sessions/{session['session_id']}").json()
+        self.assertEqual(current["intervention_cost"], 0.0)
+        self.assertEqual(current["event_digest"], session["event_digest"])
+
+    def test_paused_session_can_expedite_repair(self):
+        session = self.create_failed_session()
+        self.client.post(f"/sessions/{session['session_id']}/pause")
+
+        response = self.client.post(
+            f"/sessions/{session['session_id']}/actions/expedite-repair",
+            json={"machine_id": "CNC-01"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["paused"])
+        self.assertEqual(response.json()["intervention_cost"], 350.0)
+        self.assertEqual(
+            response.json()["summary"]["machine_metrics"]["cnc_01"]["state"],
+            "IDLE",
+        )
+
+    def test_expedite_repair_rejects_invalid_body(self):
+        session_id = self.create_session()["session_id"]
+
+        for payload in ({}, {"machine_id": ""}):
+            with self.subTest(payload=payload):
+                response = self.client.post(
+                    f"/sessions/{session_id}/actions/expedite-repair",
+                    json=payload,
+                )
+                self.assertEqual(response.status_code, 422)
 
     def test_simulate_without_failures_reports_no_cnc_failures(self):
         response = self.client.post(

@@ -153,7 +153,7 @@ The API returns metrics for every machine and event type; they are shortened abo
 
 Sessions let a client create a factory once and advance the same simulation over multiple requests. Machine state, buffers, queued events, random streams, the event log, and the simulation clock remain intact between advances.
 
-Sessions live in application memory and are lost when the API process restarts.
+Sessions and player actions are an in-memory MVP. They are lost when the API process restarts, and no external persistence or background processing is performed.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
@@ -163,6 +163,7 @@ Sessions live in application memory and are lost when the API process restarts.
 | `POST` | `/sessions/{session_id}/pause` | Pause the session |
 | `POST` | `/sessions/{session_id}/resume` | Resume the session |
 | `PUT` | `/sessions/{session_id}/speed` | Set playback speed to `1`, `2`, or `4` |
+| `POST` | `/sessions/{session_id}/actions/expedite-repair` | Immediately repair a DOWN machine |
 
 ### Create a session
 
@@ -183,6 +184,7 @@ The response contains a UUID, session controls, the initial simulation summary, 
   "session_id": "f53c318f-2d00-47c6-b20a-80695b31009e",
   "paused": false,
   "speed": 1,
+  "intervention_cost": 0.0,
   "summary": {
     "seed": 42,
     "simulated_minutes": 0
@@ -220,6 +222,21 @@ curl -X PUT http://127.0.0.1:8000/sessions/{session_id}/speed \
 
 Advancing a paused session returns HTTP `409`. Unknown session IDs return `404`, while invalid request bodies and unsupported speeds return `422`.
 
+### Expedite a repair
+
+An emergency maintenance call-out immediately repairs a machine that is currently `DOWN` after an unplanned failure. The ordinary scheduled repair is cancelled, downtime stops accumulating at the current simulation time, and the session's cumulative intervention cost increases by **350.00**.
+
+Use the machine's display identifier, such as `CNC-01`:
+
+```bash
+curl -X POST \
+  http://127.0.0.1:8000/sessions/{session_id}/actions/expedite-repair \
+  -H "Content-Type: application/json" \
+  -d '{"machine_id": "CNC-01"}'
+```
+
+The action is allowed while a session is paused; pausing blocks only time advancement. An unknown session or machine returns HTTP `404`, a known machine that is not `DOWN` returns `409`, and an invalid request body returns `422`. Failed actions do not change the simulation or add cost.
+
 ## Deterministic by design
 
 Each source of randomness uses a stable, named pseudo-random stream derived from the selected seed. Running the same scenario with the same seed and duration produces the same summary and event digest. This makes PlantOps useful for regression tests, scenario comparisons, and reproducible experiments.
@@ -242,7 +259,7 @@ Run the complete test suite from the `plantops-core` directory:
 python -m unittest discover -s tests -v
 ```
 
-The tests cover deterministic replay, incremental advancement, seed variation, production output, failures and repairs, blocking, starvation, quality metrics, API health, input validation, and the complete session lifecycle.
+The tests cover deterministic replay, incremental advancement, event cancellation, expedited repairs, intervention costs, seed variation, production output, failures and repairs, blocking, starvation, quality metrics, API health, input validation, and the complete session lifecycle.
 
 ## Project structure
 

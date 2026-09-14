@@ -10,6 +10,25 @@ from typing import Any
 from .model import Buffer, EventRecord, Machine, MachineState, Scenario
 
 
+class SimulationDomainError(Exception):
+    """Base class for invalid simulation-domain operations."""
+
+
+class UnknownMachineError(SimulationDomainError):
+    def __init__(self, machine_id: str) -> None:
+        super().__init__(f"Machine '{machine_id}' was not found")
+
+
+class MachineNotDownError(SimulationDomainError):
+    def __init__(self, machine_id: str, state: MachineState) -> None:
+        super().__init__(f"Machine '{machine_id}' is {state.value}, not DOWN")
+
+
+class PendingRepairEventError(SimulationDomainError):
+    def __init__(self, machine_id: str) -> None:
+        super().__init__(f"Machine '{machine_id}' has no pending repair event")
+
+
 class RandomStreams:
     """Stable named PRNG streams; Python's randomized hash is never used."""
 
@@ -33,6 +52,8 @@ class ProductionLineSimulation:
         self.clock = 0.0
         self._sequence = 0
         self._events: list[tuple[float, int, str, str | None, int | None]] = []
+        self._cancelled_event_ids: set[int] = set()
+        self._pending_repair_event_ids: dict[str, int] = {}
         self.rng = RandomStreams(seed)
         self.event_log: list[EventRecord] = []
         self._completion_recorded = False
@@ -53,9 +74,19 @@ class ProductionLineSimulation:
     def _record(self, kind: str, machine_id: str | None = None, unit_id: int | None = None, detail: str = "") -> None:
         self.event_log.append(EventRecord(round(self.clock, 6), kind, machine_id, unit_id, detail))
 
-    def _schedule(self, time: float, kind: str, machine_id: str | None = None, unit_id: int | None = None) -> None:
+    def _schedule(
+        self,
+        time: float,
+        kind: str,
+        machine_id: str | None = None,
+        unit_id: int | None = None,
+    ) -> int:
         self._sequence += 1
         heapq.heappush(self._events, (time, self._sequence, kind, machine_id, unit_id))
+        return self._sequence
+
+    def _cancel_scheduled_event(self, event_id: int) -> None:
+        self._cancelled_event_ids.add(event_id)
 
     def _try_start(self, machine: Machine) -> bool:
         if machine.state in {MachineState.RUNNING, MachineState.DOWN}:
@@ -113,7 +144,12 @@ class ProductionLineSimulation:
                 machine.config.repair_min_minutes, machine.config.repair_max_minutes
             )
             self._record("MACHINE_FAILED", machine.config.id, detail=f"repair_eta={repair:.2f}")
-            self._schedule(self.clock + repair, "REPAIR_COMPLETED", machine.config.id)
+            repair_event_id = self._schedule(
+                self.clock + repair,
+                "REPAIR_COMPLETED",
+                machine.config.id,
+            )
+            self._pending_repair_event_ids[machine.config.id] = repair_event_id
 
     def _repair_machine(self, machine: Machine) -> None:
         if machine.state != MachineState.DOWN:
@@ -122,6 +158,38 @@ class ProductionLineSimulation:
         machine.down_minutes += self.clock - failure.time
         machine.state = MachineState.IDLE
         self._record("REPAIR_COMPLETED", machine.config.id)
+
+    def expedite_repair(self, machine_id: str) -> None:
+        """Immediately repair a failed machine and invalidate its scheduled repair."""
+        machine = self._resolve_machine(machine_id)
+        if machine.state != MachineState.DOWN:
+            raise MachineNotDownError(machine.config.name, machine.state)
+
+        repair_event_id = self._pending_repair_event_ids.get(machine.config.id)
+        if repair_event_id is None:
+            raise PendingRepairEventError(machine.config.name)
+
+        self._cancel_scheduled_event(repair_event_id)
+        del self._pending_repair_event_ids[machine.config.id]
+        self._record("REPAIR_EXPEDITED", machine.config.id)
+        self._repair_machine(machine)
+
+    def _resolve_machine(self, machine_id: str) -> Machine:
+        normalized_id = machine_id.strip().casefold().replace("-", "_")
+        machine = self.machines.get(normalized_id)
+        if machine is None:
+            normalized_name = machine_id.strip().casefold()
+            machine = next(
+                (
+                    candidate
+                    for candidate in self.machines.values()
+                    if candidate.config.name.casefold() == normalized_name
+                ),
+                None,
+            )
+        if machine is None:
+            raise UnknownMachineError(machine_id)
+        return machine
 
     def _effective_down_minutes(self, machine: Machine) -> float:
         """Include an unfinished repair when the simulation stops mid-downtime."""
@@ -144,7 +212,10 @@ class ProductionLineSimulation:
 
         self._attempt_all_starts()
         while self._events and self._events[0][0] <= until_minutes:
-            time, _, kind, machine_id, unit_id = heapq.heappop(self._events)
+            time, event_id, kind, machine_id, unit_id = heapq.heappop(self._events)
+            if event_id in self._cancelled_event_ids:
+                self._cancelled_event_ids.remove(event_id)
+                continue
             self.clock = time
             machine = self.machines[machine_id] if machine_id else None
             if kind == "PROCESS_COMPLETED":
@@ -152,6 +223,9 @@ class ProductionLineSimulation:
                 self._complete_process(machine, unit_id)
             elif kind == "REPAIR_COMPLETED":
                 assert machine is not None
+                if self._pending_repair_event_ids.get(machine.config.id) != event_id:
+                    continue
+                del self._pending_repair_event_ids[machine.config.id]
                 self._repair_machine(machine)
             else:
                 raise RuntimeError(f"Unknown event type: {kind}")
