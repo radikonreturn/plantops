@@ -35,6 +35,16 @@ class ProductionLineSimulationTests(unittest.TestCase):
         self.assertIn("MACHINE_FAILED", result["event_counts"])
         self.assertTrue(any(event.kind == "REPAIR_COMPLETED" for event in sim.event_log))
 
+    def test_unfinished_repair_counts_as_downtime_at_shift_end(self):
+        scenario = make_mvp_scenario(cnc_failure_probability=1.0)
+        sim = ProductionLineSimulation(scenario, seed=42)
+        result = sim.run(2)
+        cnc = result["machine_metrics"]["cnc_01"]
+
+        self.assertEqual(cnc["state"], "DOWN")
+        self.assertGreater(cnc["down_minutes"], 0)
+        self.assertLess(cnc["availability"], 1)
+
     def test_small_buffers_can_block_upstream_machine(self):
         scenario = make_mvp_scenario(cnc_failure_probability=0)
         scenario.buffer_capacities["after_cnc_01"] = 1

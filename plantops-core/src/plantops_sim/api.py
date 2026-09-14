@@ -34,7 +34,7 @@ def simulate(request: SimulationRequest) -> dict[str, Any]:
         scenario = make_mvp_scenario(cnc_failure_probability=0)
 
     simulation = ProductionLineSimulation(scenario, seed=request.seed)
-    summary = simulation.run(request.minutes)
+    summary = simulation.run(until_minutes=request.minutes)
     return {
         "summary": summary,
         "event_digest": simulation.digest(),
