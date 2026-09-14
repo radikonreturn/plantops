@@ -125,7 +125,7 @@ Example response (abridged):
     "good_production": 255,
     "scrap": 7,
     "quality": 0.9733,
-    "oee": 0.9131,
+    "oee": 0.9089,
     "wip": 0,
     "raw_material_remaining": 238,
     "machine_metrics": {
@@ -133,7 +133,7 @@ Example response (abridged):
         "state": "DOWN",
         "processed": 262,
         "failures": 10,
-        "availability": 0.754
+        "availability": 0.7368
       }
     },
     "event_counts": {
@@ -146,7 +146,7 @@ Example response (abridged):
 }
 ```
 
-The API returns metrics for every machine and event type; they are shortened above for readability.
+The API returns metrics for every machine and event type; they are shortened above for readability. The digest is deterministic for the same scenario, seed, duration, and engine version.
 
 ## Deterministic by design
 
@@ -170,7 +170,7 @@ Run the complete test suite from the `plantops-core` directory:
 python -m unittest discover -s tests -v
 ```
 
-The tests cover deterministic replay, seed variation, production output, failures and repairs, blocking, starvation, quality metrics, API health, the simulation response contract, and deterministic API requests.
+The tests cover deterministic replay, seed variation, production output, failures and repairs, blocking, starvation, quality metrics, API health, the simulation response contract, API input validation, the no-failures path, and deterministic API requests.
 
 ## Project structure
 
