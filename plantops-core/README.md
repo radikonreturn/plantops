@@ -36,6 +36,7 @@ The MVP scenario includes:
 - Quality-stage scrap
 - OEE, availability, performance, WIP, downtime, and production metrics
 - A SHA-256 event digest for reproducibility checks
+- Independent in-memory simulation sessions with pause, resume, and speed controls
 
 ## WSL quick start
 
@@ -148,6 +149,77 @@ Example response (abridged):
 
 The API returns metrics for every machine and event type; they are shortened above for readability. The digest is deterministic for the same scenario, seed, duration, and engine version.
 
+## Stateful simulation sessions
+
+Sessions let a client create a factory once and advance the same simulation over multiple requests. Machine state, buffers, queued events, random streams, the event log, and the simulation clock remain intact between advances.
+
+Sessions live in application memory and are lost when the API process restarts.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/sessions` | Create a session |
+| `GET` | `/sessions/{session_id}` | Read its current state |
+| `POST` | `/sessions/{session_id}/advance` | Advance simulated time |
+| `POST` | `/sessions/{session_id}/pause` | Pause the session |
+| `POST` | `/sessions/{session_id}/resume` | Resume the session |
+| `PUT` | `/sessions/{session_id}/speed` | Set playback speed to `1`, `2`, or `4` |
+
+### Create a session
+
+```bash
+curl -X POST http://127.0.0.1:8000/sessions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "seed": 42,
+    "failures_enabled": true,
+    "speed": 1
+  }'
+```
+
+The response contains a UUID, session controls, the initial simulation summary, and an event digest:
+
+```json
+{
+  "session_id": "f53c318f-2d00-47c6-b20a-80695b31009e",
+  "paused": false,
+  "speed": 1,
+  "summary": {
+    "seed": 42,
+    "simulated_minutes": 0
+  },
+  "event_digest": "<sha256>"
+}
+```
+
+The summary is abridged above; API responses include the complete simulation metrics.
+
+### Inspect and advance
+
+Replace `{session_id}` with the UUID returned when the session was created.
+
+```bash
+curl http://127.0.0.1:8000/sessions/{session_id}
+
+curl -X POST http://127.0.0.1:8000/sessions/{session_id}/advance \
+  -H "Content-Type: application/json" \
+  -d '{"minutes": 15}'
+```
+
+The `minutes` value is an explicit amount of simulated time. The stored speed is playback metadata for clients and future schedulers; it does not multiply this value.
+
+### Pause, resume, and change speed
+
+```bash
+curl -X POST http://127.0.0.1:8000/sessions/{session_id}/pause
+curl -X POST http://127.0.0.1:8000/sessions/{session_id}/resume
+
+curl -X PUT http://127.0.0.1:8000/sessions/{session_id}/speed \
+  -H "Content-Type: application/json" \
+  -d '{"speed": 4}'
+```
+
+Advancing a paused session returns HTTP `409`. Unknown session IDs return `404`, while invalid request bodies and unsupported speeds return `422`.
+
 ## Deterministic by design
 
 Each source of randomness uses a stable, named pseudo-random stream derived from the selected seed. Running the same scenario with the same seed and duration produces the same summary and event digest. This makes PlantOps useful for regression tests, scenario comparisons, and reproducible experiments.
@@ -170,7 +242,7 @@ Run the complete test suite from the `plantops-core` directory:
 python -m unittest discover -s tests -v
 ```
 
-The tests cover deterministic replay, seed variation, production output, failures and repairs, blocking, starvation, quality metrics, API health, the simulation response contract, API input validation, the no-failures path, and deterministic API requests.
+The tests cover deterministic replay, incremental advancement, seed variation, production output, failures and repairs, blocking, starvation, quality metrics, API health, input validation, and the complete session lifecycle.
 
 ## Project structure
 
@@ -181,7 +253,8 @@ plantops-core/
 │   ├── cli.py          # Command-line entry point
 │   ├── engine.py       # Discrete-event simulation engine
 │   ├── model.py        # Scenario, machine, buffer, and event models
-│   └── scenario.py     # MVP production-line configuration
+│   ├── scenario.py     # MVP production-line configuration
+│   └── sessions.py     # In-memory stateful session manager
 ├── tests/
 │   ├── test_api.py
 │   └── test_simulation.py

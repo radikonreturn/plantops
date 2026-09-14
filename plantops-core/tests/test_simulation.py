@@ -65,6 +65,36 @@ class ProductionLineSimulationTests(unittest.TestCase):
         self.assertLessEqual(quality, 1)
         self.assertGreater(result["oee"], 0)
 
+    def test_incremental_advance_matches_single_run(self):
+        incremental = ProductionLineSimulation(make_mvp_scenario(), seed=77)
+        incremental.advance_to(120)
+        incremental.advance_by(180)
+        incremental_result = incremental.run(480)
+
+        single_run = ProductionLineSimulation(make_mvp_scenario(), seed=77)
+        single_run_result = single_run.run(480)
+
+        self.assertEqual(incremental_result, single_run_result)
+        self.assertEqual(incremental.digest(), single_run.digest())
+
+    def test_incremental_advance_rejects_backwards_time(self):
+        simulation = ProductionLineSimulation(make_mvp_scenario(), seed=42)
+        simulation.advance_to(60)
+
+        with self.assertRaisesRegex(ValueError, "backwards"):
+            simulation.advance_to(59)
+
+    def test_incremental_updates_do_not_add_completion_events(self):
+        simulation = ProductionLineSimulation(make_mvp_scenario(), seed=42)
+        simulation.advance_by(30)
+        simulation.advance_by(30)
+
+        self.assertNotIn("SIMULATION_COMPLETED", simulation.summary()["event_counts"])
+
+        simulation.run(90)
+        simulation.run(90)
+        self.assertEqual(simulation.summary()["event_counts"]["SIMULATION_COMPLETED"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

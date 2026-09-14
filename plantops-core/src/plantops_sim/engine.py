@@ -35,6 +35,7 @@ class ProductionLineSimulation:
         self._events: list[tuple[float, int, str, str | None, int | None]] = []
         self.rng = RandomStreams(seed)
         self.event_log: list[EventRecord] = []
+        self._completion_recorded = False
         self.buffers = {
             buffer_id: Buffer(buffer_id, capacity)
             for buffer_id, capacity in scenario.buffer_capacities.items()
@@ -134,10 +135,15 @@ class ProductionLineSimulation:
             effective_down += self.clock - failure.time
         return effective_down
 
-    def run(self, until_minutes: float | None = None) -> dict[str, Any]:
-        until = self.scenario.shift_minutes if until_minutes is None else until_minutes
+    def advance_to(self, until_minutes: float) -> dict[str, Any]:
+        """Advance to an absolute simulation time while preserving all state."""
+        if until_minutes < self.clock:
+            raise ValueError(
+                f"Cannot move simulation time backwards from {self.clock} to {until_minutes}"
+            )
+
         self._attempt_all_starts()
-        while self._events and self._events[0][0] <= until:
+        while self._events and self._events[0][0] <= until_minutes:
             time, _, kind, machine_id, unit_id = heapq.heappop(self._events)
             self.clock = time
             machine = self.machines[machine_id] if machine_id else None
@@ -150,8 +156,22 @@ class ProductionLineSimulation:
             else:
                 raise RuntimeError(f"Unknown event type: {kind}")
             self._attempt_all_starts()
-        self.clock = until
-        self._record("SIMULATION_COMPLETED")
+        self.clock = until_minutes
+        return self.summary()
+
+    def advance_by(self, minutes: float) -> dict[str, Any]:
+        """Advance by a relative number of simulated minutes."""
+        if minutes < 0:
+            raise ValueError("Advance duration cannot be negative")
+        return self.advance_to(self.clock + minutes)
+
+    def run(self, until_minutes: float | None = None) -> dict[str, Any]:
+        """Run to a target time and retain the legacy completion event."""
+        until = self.scenario.shift_minutes if until_minutes is None else until_minutes
+        self.advance_to(until)
+        if not self._completion_recorded:
+            self._record("SIMULATION_COMPLETED")
+            self._completion_recorded = True
         return self.summary()
 
     def summary(self) -> dict[str, Any]:

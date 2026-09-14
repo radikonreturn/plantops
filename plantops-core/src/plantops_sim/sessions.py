@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from threading import RLock
+from typing import Any
+from uuid import uuid4
+
+from .engine import ProductionLineSimulation
+from .scenario import make_mvp_scenario
+
+
+ALLOWED_SPEEDS = frozenset({1, 2, 4})
+
+
+class SessionNotFoundError(LookupError):
+    def __init__(self, session_id: str) -> None:
+        super().__init__(f"Simulation session '{session_id}' was not found")
+
+
+class SessionPausedError(RuntimeError):
+    def __init__(self, session_id: str) -> None:
+        super().__init__(f"Simulation session '{session_id}' is paused")
+
+
+@dataclass
+class SimulationSession:
+    session_id: str
+    simulation: ProductionLineSimulation
+    paused: bool = False
+    speed: int = 1
+
+    def __post_init__(self) -> None:
+        if type(self.speed) is not int or self.speed not in ALLOWED_SPEEDS:
+            raise ValueError("Speed must be one of: 1, 2, 4")
+
+
+class SessionManager:
+    """Thread-safe in-memory owner of stateful simulation sessions."""
+
+    def __init__(self) -> None:
+        self._sessions: dict[str, SimulationSession] = {}
+        self._lock = RLock()
+
+    def create_session(
+        self,
+        *,
+        seed: int = 42,
+        failures_enabled: bool = True,
+        speed: int = 1,
+    ) -> dict[str, Any]:
+        self._validate_speed(speed)
+        scenario = (
+            make_mvp_scenario()
+            if failures_enabled
+            else make_mvp_scenario(cnc_failure_probability=0)
+        )
+        session = SimulationSession(
+            session_id=str(uuid4()),
+            simulation=ProductionLineSimulation(scenario, seed=seed),
+            speed=speed,
+        )
+        with self._lock:
+            self._sessions[session.session_id] = session
+            return self._snapshot(session)
+
+    def get_session(self, session_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self._snapshot(self._require_session(session_id))
+
+    def pause_session(self, session_id: str) -> dict[str, Any]:
+        with self._lock:
+            session = self._require_session(session_id)
+            session.paused = True
+            return self._snapshot(session)
+
+    def resume_session(self, session_id: str) -> dict[str, Any]:
+        with self._lock:
+            session = self._require_session(session_id)
+            session.paused = False
+            return self._snapshot(session)
+
+    def set_speed(self, session_id: str, speed: int) -> dict[str, Any]:
+        self._validate_speed(speed)
+        with self._lock:
+            session = self._require_session(session_id)
+            session.speed = speed
+            return self._snapshot(session)
+
+    def advance_session(self, session_id: str, minutes: float) -> dict[str, Any]:
+        if minutes <= 0:
+            raise ValueError("Advance duration must be greater than zero")
+        with self._lock:
+            session = self._require_session(session_id)
+            if session.paused:
+                raise SessionPausedError(session_id)
+            session.simulation.advance_by(minutes)
+            return self._snapshot(session)
+
+    def _require_session(self, session_id: str) -> SimulationSession:
+        try:
+            return self._sessions[session_id]
+        except KeyError:
+            raise SessionNotFoundError(session_id) from None
+
+    @staticmethod
+    def _validate_speed(speed: int) -> None:
+        if type(speed) is not int or speed not in ALLOWED_SPEEDS:
+            raise ValueError("Speed must be one of: 1, 2, 4")
+
+    @staticmethod
+    def _snapshot(session: SimulationSession) -> dict[str, Any]:
+        return {
+            "session_id": session.session_id,
+            "paused": session.paused,
+            "speed": session.speed,
+            "summary": session.simulation.summary(),
+            "event_digest": session.simulation.digest(),
+        }

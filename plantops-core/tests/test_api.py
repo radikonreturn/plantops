@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from uuid import UUID
 
 from fastapi.testclient import TestClient
 
@@ -51,6 +52,128 @@ class ApiTests(unittest.TestCase):
             first_response.json()["event_digest"],
             second_response.json()["event_digest"],
         )
+
+    def create_session(self, **overrides):
+        request = {"seed": 42, "failures_enabled": True, "speed": 1}
+        request.update(overrides)
+        response = self.client.post("/sessions", json=request)
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def test_create_session_returns_uuid_and_initial_state(self):
+        session = self.create_session()
+
+        UUID(session["session_id"])
+        self.assertFalse(session["paused"])
+        self.assertEqual(session["speed"], 1)
+        self.assertEqual(session["summary"]["simulated_minutes"], 0)
+        self.assertNotIn("simulation", session)
+
+    def test_advance_changes_time_without_replacing_session(self):
+        created = self.create_session()
+
+        response = self.client.post(
+            f"/sessions/{created['session_id']}/advance",
+            json={"minutes": 15},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        advanced = response.json()
+        self.assertEqual(advanced["session_id"], created["session_id"])
+        self.assertEqual(advanced["summary"]["simulated_minutes"], 15)
+
+        current = self.client.get(f"/sessions/{created['session_id']}").json()
+        self.assertEqual(current["event_digest"], advanced["event_digest"])
+
+    def test_pause_prevents_advance(self):
+        session = self.create_session()
+        session_id = session["session_id"]
+
+        pause_response = self.client.post(f"/sessions/{session_id}/pause")
+        advance_response = self.client.post(
+            f"/sessions/{session_id}/advance",
+            json={"minutes": 10},
+        )
+
+        self.assertEqual(pause_response.status_code, 200)
+        self.assertTrue(pause_response.json()["paused"])
+        self.assertEqual(advance_response.status_code, 409)
+        self.assertEqual(
+            self.client.get(f"/sessions/{session_id}").json()["summary"]["simulated_minutes"],
+            0,
+        )
+
+    def test_resume_allows_advance_again(self):
+        session_id = self.create_session()["session_id"]
+        self.client.post(f"/sessions/{session_id}/pause")
+
+        resume_response = self.client.post(f"/sessions/{session_id}/resume")
+        advance_response = self.client.post(
+            f"/sessions/{session_id}/advance",
+            json={"minutes": 10},
+        )
+
+        self.assertEqual(resume_response.status_code, 200)
+        self.assertFalse(resume_response.json()["paused"])
+        self.assertEqual(advance_response.status_code, 200)
+        self.assertEqual(advance_response.json()["summary"]["simulated_minutes"], 10)
+
+    def test_invalid_speed_is_rejected(self):
+        session_id = self.create_session()["session_id"]
+
+        response = self.client.put(
+            f"/sessions/{session_id}/speed",
+            json={"speed": 3},
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_speed_can_be_changed(self):
+        session_id = self.create_session()["session_id"]
+
+        response = self.client.put(
+            f"/sessions/{session_id}/speed",
+            json={"speed": 4},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["speed"], 4)
+        self.assertEqual(
+            self.client.get(f"/sessions/{session_id}").json()["speed"],
+            4,
+        )
+
+    def test_unknown_session_returns_not_found(self):
+        unknown_session_id = "00000000-0000-0000-0000-000000000000"
+
+        response = self.client.get(f"/sessions/{unknown_session_id}")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("was not found", response.json()["detail"])
+
+    def test_same_seed_sessions_advance_independently_and_deterministically(self):
+        first = self.create_session(seed=91)
+        second = self.create_session(seed=91)
+
+        first_advanced = self.client.post(
+            f"/sessions/{first['session_id']}/advance",
+            json={"minutes": 120},
+        ).json()
+        second_before_advance = self.client.get(
+            f"/sessions/{second['session_id']}"
+        ).json()
+        second_advanced = self.client.post(
+            f"/sessions/{second['session_id']}/advance",
+            json={"minutes": 120},
+        ).json()
+
+        self.assertNotEqual(first["session_id"], second["session_id"])
+        self.assertEqual(second_before_advance["summary"]["simulated_minutes"], 0)
+        self.assertEqual(
+            first_advanced["event_digest"],
+            second_advanced["event_digest"],
+        )
+        self.assertEqual(first_advanced["summary"], second_advanced["summary"])
 
     def test_simulate_without_failures_reports_no_cnc_failures(self):
         response = self.client.post(
