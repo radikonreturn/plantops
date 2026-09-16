@@ -189,6 +189,7 @@ def profile_snapshot(
     bottleneck_cycle = max(s.ideal_cycle_minutes for s in scenario.stages)
     cumulative = 0
     risks = {}
+    forecasts = {}
     for order in sorted(order_summary["orders"], key=lambda o: (o["due_minute"], -o["priority"], o["id"])):
         cumulative += order["remaining_quantity"]
         if order["remaining_quantity"] == 0:
@@ -202,6 +203,8 @@ def profile_snapshot(
         else:
             risk = "Open"
         risks[order["id"]] = risk
+        forecasts[order["id"]] = (round(simulation.clock + cumulative * bottleneck_cycle, 2)
+                                     if order["remaining_quantity"] else None)
     for order_id, risk in risks.items():
         if risk in {"Late", "At risk"}:
             alert(f"order-{order_id}", "dispatch", "critical" if risk == "Late" else "attention",
@@ -209,6 +212,10 @@ def profile_snapshot(
     if supply["purchase_orders_open"]:
         alert("inbound", "receiving", "info",
               f"{supply['inbound_units']} units inbound on {supply['purchase_orders_open']} open POs.", "Inventory")
+    for event in summary.get("shift_events", []):
+        if event["state"] == "active":
+            alert(event["id"], event["zone"], event["severity"],
+                  f"{event['title']}: {event['detail']}", event["workspace"])
     # Put the handover concern first when it is still true, after severity ordering.
     alerts.sort(key=lambda a: ({"critical": 0, "attention": 1, "info": 2}[a["severity"]],
                                a["zone"] != profile.primary_zone, a["id"]))
@@ -237,11 +244,11 @@ def profile_snapshot(
                                 "uncovered_demand": max(0, remaining_demand - coverage)},
                   "dispatch": {"allocated_units": summary["finished_goods_allocated"],
                                "at_risk_orders": sum(r in {"Late", "At risk"} for r in risks.values())},
-                  "order_risks": risks},
+                  "order_risks": risks, "order_forecasts": forecasts},
         "capacity": {"bottleneck_cycle_minutes": bottleneck_cycle,
                      "bottleneck_machines": [s.id for s in scenario.stages
                                              if s.ideal_cycle_minutes == bottleneck_cycle],
-                     "ideal_shift_units": int(scenario.shift_minutes / bottleneck_cycle),
+                     "ideal_shift_units": int(summary["shift_minutes"] / bottleneck_cycle),
                      "estimate_note": "Ideal capacity only; excludes failures, scrap, starvation and carried-in WIP."},
         "decision_cards": decision_cards(simulation, profile, summary, machines, risks),
         "shift_review": shift_review(simulation, profile, summary, alerts),
@@ -250,7 +257,8 @@ def profile_snapshot(
 
 def action_log(simulation: ProductionLineSimulation) -> list[dict[str, Any]]:
     kinds = {"REPAIR_EXPEDITED", "PLANNED_MAINTENANCE_STARTED",
-             "ORDER_PRIORITY_CHANGED", "PURCHASE_ORDER_PLACED"}
+             "ORDER_PRIORITY_CHANGED", "PURCHASE_ORDER_PLACED",
+             "PURCHASE_ORDER_EXPEDITED", "OVERTIME_AUTHORIZED", "QUALITY_CONTAINMENT_ACTIVATED"}
     return [
         {"id": index, "minute": event.time, "kind": event.kind,
          "machine_id": event.machine_id, "detail": event.detail}
@@ -264,7 +272,7 @@ def decision_cards(
     summary: dict[str, Any],
     machines: list[dict[str, Any]],
     risks: dict[str, str],
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Three compact, state-backed decision prompts for the current shift.
 
     These are not scripted quests: their status reflects actions and operational state
@@ -272,12 +280,12 @@ def decision_cards(
     answer, because trade-offs are the point of the game.
     """
     action_kinds = {event.kind for event in simulation.event_log}
-    cards: list[dict[str, str]] = []
+    cards: list[dict[str, Any]] = []
     machine = next((item for item in machines if item["id"] == profile.primary_zone), None)
 
     if machine and machine["maintenance_available"]:
         completed = any(
-            event.kind == "PLANNED_MAINTENANCE_STARTED" and event.machine_id == machine["id"]
+            event.kind in {"PLANNED_MAINTENANCE_STARTED", "REPAIR_EXPEDITED"} and event.machine_id == machine["id"]
             for event in simulation.event_log
         )
         cards.append({
@@ -285,7 +293,7 @@ def decision_cards(
             "title": f"Decide on {machine['name']}",
             "detail": (
                 f"{machine['fault_mode']}. {machine['attention_reason'] or 'Review health, queue and delivery exposure before acting.'} "
-                "Planned service consumes time and cost but restores equipment health."
+                f"Service: {machine['maintenance_duration']:g} minutes stopped / {machine['maintenance_cost']:g} cost / restores health to 100."
             ),
             "workspace": "Maintenance",
             "status": "decision logged" if completed else "open decision",
@@ -298,7 +306,7 @@ def decision_cards(
             "title": "Secure material coverage",
             "detail": (
                 f"The line has {uncovered} units of available or inbound material. "
-                "A purchase order protects continuity, but commits cost and may arrive late."
+                "Purchasing commits quantity × unit cost. Expedite an open PO for 120 cost to halve its remaining transit time; later disruption can still delay it."
             ),
             "workspace": "Inventory",
             "status": "decision logged" if supplied else "open decision",
@@ -308,11 +316,11 @@ def decision_cards(
             "id": "contain-quality",
             "title": "Plan for quality containment",
             "detail": (
-                "The final-inspection lot has elevated rejection risk. There is no manual release override; "
-                "use the quality and order views to protect customer commitments before scrap materializes."
+                "Source rejection risk remains unchanged. Containment isolates latent defects in newly inspected units; "
+                "each inspection adds 0.6 minutes and 2 cost, exposing delivery."
             ),
             "workspace": "Quality",
-            "status": "monitor live yield",
+            "status": "decision logged; source risk remains" if "QUALITY_CONTAINMENT_ACTIVATED" in action_kinds else "still open",
         })
     elif profile.primary_zone == "dispatch":
         reprioritized = "ORDER_PRIORITY_CHANGED" in action_kinds
@@ -345,15 +353,23 @@ def decision_cards(
         })
 
     cards.append({
-        "id": "verify-floor",
-        "title": "Verify the live constraint",
+        "id": "shift-extension",
+        "title": "Consider one overtime extension",
         "detail": (
-            "Inspect queue levels, station health and line state before committing a response. "
-            "The same handover category can develop differently as the shift runs."
+            "60 extra production minutes / 600 labor cost. Failure exposure increases 20% only during overtime. "
+            "Authorize before shift close; due dates remain unchanged."
         ),
-        "workspace": "Plant View",
-        "status": "live",
+        "workspace": "Production Plan",
+        "status": "decision logged" if "OVERTIME_AUTHORIZED" in action_kinds else "still open",
     })
+    for card in cards:
+        if card["id"] == "protect-customer":
+            card["detail"] += " Priority changes only same-deadline allocation; protecting one order may expose another."
+            card["decision_logged"] = any(e.kind == "ORDER_PRIORITY_CHANGED" and f"order_id={upcoming['id']};" in e.detail for e in simulation.event_log)
+        else:
+            card["decision_logged"] = "decision logged" in card["status"]
+        if simulation.clock >= summary["shift_minutes"]:
+            card["status"] = "outcome observed" + ("; decision logged" if card["decision_logged"] else "; no decision logged")
     return cards[:3]
 
 
@@ -366,7 +382,7 @@ def shift_review(
     """Evidence-based management review for interim and completed shifts."""
     order_summary = summary["order_summary"]
     metrics = summary["machine_metrics"]
-    final = simulation.clock >= simulation.scenario.shift_minutes
+    final = simulation.clock >= summary["shift_minutes"]
     failures = sum(metric["failures"] for metric in metrics.values())
     downtime = sum(metric["unplanned_downtime_minutes"] for metric in metrics.values())
     committed_procurement = summary["supply_summary"]["procurement_committed_cost"]
@@ -380,6 +396,11 @@ def shift_review(
     if not final and any(alert["zone"] == "dispatch" for alert in alerts):
         delivery_status = "attention"
     quality_status = "good" if quality >= 0.97 else "attention" if quality >= 0.90 else "critical"
+    if not simulation.machines[simulation.scenario.stages[-1].id].processed_units:
+        quality_status = "attention"
+    escapes = summary.get("quality_containment", {}).get("customer_escapes", 0)
+    if escapes:
+        quality_status = "critical"
     resilience_status = "good" if failures == 0 else "attention" if failures <= 2 else "critical"
     cost_status = "good" if committed_procurement == 0 else "attention"
     delivery_value = (
@@ -395,16 +416,23 @@ def shift_review(
         )
     else:
         headline = "Interim management review"
-        conclusion = "This is a live readout. Delivery and quality outcomes are final only at shift close."
+        conclusion = "Provisional live report. Delivery and quality outcomes are final only at shift close."
+    if final:
+        conclusion = (f"Observed outcome: {order_summary['units_delivered']} units delivered, "
+                      f"{order_summary['backlog_units']} backlog, {summary['scrap']} scrap and "
+                      f"{downtime:.1f} summed machine downtime minutes. " + conclusion)
     return {
         "state": "final" if final else "interim",
         "headline": headline,
         "conclusion": conclusion,
         "actions_recorded": len(actions),
+        "event_history": summary.get("shift_events", []),
+        "quality_containment": summary.get("quality_containment"),
         "scorecard": [
             {"id": "delivery", "label": "Customer delivery", "status": delivery_status, "value": delivery_value},
             {"id": "quality", "label": "Quality yield", "status": quality_status,
-             "value": f"{quality:.1%} observed yield · {summary['scrap']} scrap"},
+             "value": (f"{quality:.1%} inspection yield · {summary['scrap']} scrap · {escapes} customer escapes"
+                       if simulation.machines[simulation.scenario.stages[-1].id].processed_units else "No inspections completed yet")},
             {"id": "resilience", "label": "Equipment resilience", "status": resilience_status,
              "value": f"{failures} failure(s) · {downtime:.1f} unplanned min"},
             {"id": "cost", "label": "Procurement commitment", "status": cost_status,

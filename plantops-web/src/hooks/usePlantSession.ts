@@ -92,6 +92,9 @@ export function usePlantSession() {
   }, [act, busy]);
   return {
     session, busy, error, notice, connectionHold, newShift,
+    overtime: () => command("Overtime authorized: 60 minutes / 600 labor cost", id => api.livingAction(id, "authorize-overtime")),
+    contain: () => command("Quality containment activated", id => api.livingAction(id, "activate-containment")),
+    expeditePurchase: (poId: string) => command(`${poId} expedited / 120 cost`, id => api.livingAction(id, "expedite-purchase-order", poId)),
     toggle: () => command("Playback updated", async id => {
       const fresh = await api.getSession(id);
       const next = hold.current || fresh.paused

@@ -34,13 +34,13 @@ export default function App() {
     <main id="workspace-content" className="workspace-content">
       <div className={`operation-feedback ${error ? "has-error" : ""}`} role={error ? "alert" : "status"}><span className="signal"/><span>{error ?? busy ?? notice}{error && " Playback held; use Reconnect before continuing."}</span></div>
       {session ? <>
-        <div className="shift-context"><strong>{session.scenario_profile.title}</strong><span>{session.paused ? "Shift paused · decisions remain available" : "Live shift"}</span><button onClick={() => navigate("Office / Inbox")}>Read handover</button></div>
+        <div className="shift-context"><strong>{session.scenario_profile.title}</strong><span>{session.summary.simulated_minutes >= session.summary.shift_minutes ? "Shift closed · outcome recorded" : session.paused ? "Shift paused · decisions remain available" : "Live shift"}</span><button onClick={() => navigate("Office / Inbox")}>Read handover</button></div>
         {view === "Plant View" && <><FactoryFloor session={session} selected={selected} onSelect={setSelected}/><OrderBoard session={session} busy={!!busy} save={control.prioritize}/></>}
         {view === "Office / Inbox" && <InboxView session={session} navigate={navigate}/>}
         {view === "Production Plan" && <ProductionPlanView control={control}/>}
         {view === "Orders" && <div className="office-view"><div className="view-heading"><h1>Orders</h1><span>Delivery performance and dispatch decisions</span></div><OrderBoard session={session} busy={!!busy} save={control.prioritize}/></div>}
         {view === "Maintenance" && <MaintenanceView control={control}/>}
-        {view === "Quality" && <QualityView session={session}/>}
+        {view === "Quality" && <QualityView control={control}/>}
         {view === "Inventory" && <InventoryView control={control}/>}
         {view === "Reports" && <ReportsView session={session}/>}
         {selected && <AssetPopover machineId={selected} control={control} onClose={() => setSelected(null)}/>}

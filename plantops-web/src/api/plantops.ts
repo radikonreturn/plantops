@@ -160,3 +160,9 @@ export function startPreventiveMaintenance(
     },
   );
 }
+
+export function livingAction(sessionId: string, action: "authorize-overtime" | "activate-containment" | "expedite-purchase-order", purchaseOrderId?: string): Promise<SessionSnapshot> {
+  return request(sessionPath(sessionId, `/actions/${action}`), {
+    method: "POST", body: JSON.stringify(purchaseOrderId ? {purchase_order_id: purchaseOrderId} : {}),
+  });
+}

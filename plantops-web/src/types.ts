@@ -63,6 +63,7 @@ export type PurchaseOrderStatus =
   | "RECEIVED_LATE";
 
 export interface PurchaseOrder {
+  expedited?: boolean; expedite_cost?: number; expected_receipt_minute?: number; supplier_late?: boolean;
   id: string;
   supplier_id: string;
   quantity: number;
@@ -96,6 +97,7 @@ export interface BufferLevels {
 }
 
 export interface SimulationSummary {
+  shift_events?: ShiftEvent[]; overtime?: OvertimeState; quality_containment?: ContainmentState;
   seed: number;
   simulated_minutes: number;
   shift_minutes: number;
@@ -115,7 +117,29 @@ export interface SimulationSummary {
   supply_summary: SupplySummary;
 }
 
+export interface ShiftEvent {
+  id: string; minute: number; end_minute: number; kind: string; title: string; detail: string;
+  severity: "info" | "attention" | "critical"; zone: string; workspace: Workspace;
+  state: "scheduled" | "active" | "resolved" | "expired"; affected_ids: string[]; closed_minute: number | null;
+}
+export interface OvertimeState {
+  authorized: boolean; extension_minutes: number; normal_shift_minutes: number; labor_cost: number;
+  fatigue_active: boolean; failure_multiplier: number; unavailable_reason: string | null;
+}
+export interface ContainmentState {
+  available: boolean; active: boolean; unavailable_reason: string | null; inspected_units: number;
+  added_inspection_minutes: number; inspection_cost: number; captured_units: number;
+  customer_escapes: number; suspect_finished_units: number;
+}
+export interface CostBreakdown {
+  emergency_repair: number; preventive_maintenance: number; procurement: number;
+  expediting: number; overtime: number; inspection: number; total: number;
+}
+export interface TimelineEntry {id: string; minute: number; title: string; state: string; workspace: Workspace}
 export interface SessionSnapshot {
+  shift_events?: ShiftEvent[]; overtime?: OvertimeState; quality_containment?: ContainmentState;
+  maintenance_history: ActionRecord[];
+  cost_breakdown: CostBreakdown; timeline: TimelineEntry[];
   session_id: string;
   paused: boolean;
   speed: PlaybackSpeed;
@@ -165,7 +189,7 @@ export interface ScenarioProfile {
     machine_concerns: Record<string, string>;
     receiving: {inbound_units: number; open_purchase_orders: number; uncovered_demand: number};
     dispatch: {allocated_units: number; at_risk_orders: number};
-    order_risks: Record<string, string>};
+    order_risks: Record<string, string>; order_forecasts: Record<string, number | null>};
   capacity: {bottleneck_cycle_minutes: number; bottleneck_machines: string[]; ideal_shift_units: number; estimate_note: string};
   decision_cards: DecisionCard[];
   shift_review: ShiftReview;
@@ -173,9 +197,10 @@ export interface ScenarioProfile {
 export interface ActionRecord {id: number; minute: number; kind: string; machine_id: string | null; detail: string}
 export interface DecisionCard {
   id: string; title: string; detail: string; workspace: Workspace;
-  status: string;
+  status: string; decision_logged: boolean;
 }
 export interface ShiftReview {
+  cost_breakdown: CostBreakdown; event_history: ShiftEvent[]; quality_containment: ContainmentState | null;
   state: "interim" | "final";
   headline: string;
   conclusion: string;

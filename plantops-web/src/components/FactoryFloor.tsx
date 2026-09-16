@@ -19,6 +19,7 @@ export function FactoryFloor({session, selected, onSelect}: {session: SessionSna
       <rect className="work-zone" x="265" y="62" width="730" height="242"/><text className="zone-detail" x="280" y="78">CUTTING &amp; MACHINING</text>
       <rect className="work-zone" x="455" y="391" width="735" height="218"/>
       <FactoryZones scene={scene}/>
+      {session.shift_events?.filter(e => e.state === "active" && ["receiving", "dispatch"].includes(e.zone)).map(e => <g key={e.id} className={`map-alert ${e.severity}`} transform={e.zone === "receiving" ? "translate(181,419)" : "translate(1370,83)"}><circle r="9"/><text y="4" textAnchor="middle">!</text><title>{e.severity}: {e.title} — {e.detail}</title></g>)}
       <path className="material-route" d="M110 400V310M1178 476h26M1300 400v-88" markerEnd="url(#process-arrow)"/>
       {profile.machines.map(asset => {
         const bay = equipmentBays[asset.stage_role];
@@ -42,7 +43,7 @@ export function FactoryFloor({session, selected, onSelect}: {session: SessionSna
             <title>{asset.input_buffer}: {input.units} units, {input.pallets} pallets</title>
           </g>}
           <MachineStation asset={asset} metric={session.summary.machine_metrics[asset.id]} x={bay.x} y={bay.y} selected={selected === asset.id} highlighted={scene.highlighted_zone === asset.id} bottleneck={profile.capacity.bottleneck_machines.includes(asset.id)} onSelect={() => onSelect(asset.id)}/>
-          {alerts.length > 0 && <g className="map-alert" transform={`translate(${bay.x + 159},${bay.y + 105})`}><circle r="9"/><text y="4" textAnchor="middle">!</text><title>{alerts.map(a => a.message).join(" ")}</title></g>}
+          {alerts.length > 0 && <g className={`map-alert ${alerts.some(a => a.severity === "critical") ? "critical" : "attention"}`} transform={`translate(${bay.x + 159},${bay.y + 105})`}><circle r="9"/><text y="4" textAnchor="middle">!</text><title>{alerts.map(a => a.message).join(" ")}</title></g>}
         </g>;
       })}
       <g className="floor-annotation"><text x="275" y="436">SHIFT OUTPUT</text><text x="275" y="460">{session.summary.good_production} good · {session.summary.scrap} scrap</text><text x="275" y="481">{session.summary.wip} queued WIP</text><text x="275" y="510">{session.summary.finished_goods_allocated} units allocated</text></g>
@@ -50,6 +51,7 @@ export function FactoryFloor({session, selected, onSelect}: {session: SessionSna
       {scene.zones.some(z => z.congested) && <g className="material-token" transform="translate(295,332)"><rect width="27" height="18"/><path d="M27 2h17m-17 14h17M3-3h8m5 0h8M3 21h8m5 0h8"/><title>Material transfer marker: queued WIP requires handling</title></g>}
       <text className="plan-caption" x="275" y="641">FLOW: CUT → MACHINE → WASH ↶ ASSEMBLE → TEST → INSPECT → DISPATCH</text>
     </svg></div>
+    <div className="map-events">{session.shift_events?.filter(e => e.state === "active").map(e => <span key={e.id} className={e.severity}>{e.severity.toUpperCase()} · {e.zone} · {e.title}</span>)}</div>
     <div className="map-concern" role="status">{topAlert ? topAlert.message : "No active exceptions."}</div>
     <div className="map-footer"><span>Attention: {scene.highlighted_zone?.replace(/_/g, " ") ?? "none"}</span><span>Pallet: 20 raw/FG or 2 WIP units · counts include hidden stacks · select equipment</span></div>
   </section>;

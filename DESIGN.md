@@ -126,3 +126,13 @@ Work panels and tables are square. Buttons and inputs have minimally softened co
 - **Don't** add gradients, glass, neon, emoji icons, or decorative SaaS cards.
 - **Don't** replace the physical equipment plan with generic metric tiles.
 - **Don't** use color or motion as the only way to communicate a state.
+
+## V3 Living Shift Operations
+
+The V3 operator surface extends the production dispatch board with a bounded, inspectable shift timeline. Seeded sessions expose three deterministic event records with stable IDs, effect windows, severity, workspace ownership, lifecycle state, and closure minute. The left rail and Plant View use the same projection for upcoming commitments, active notices, and receiving/dispatch markers; no event is created by rendering.
+
+Office / Inbox keeps the handover and decision board concise. Decision cards state the live concern, measurable trade-off, owning workspace, current status, and whether a player decision was logged. Production Plan and Orders use a compact due-window chart backed by real release and due minutes; the chart scrolls internally on narrow screens. Reports distinguish provisional and final review, observed outcomes, intervention and labor/inspection/procurement costs, event history, and action history.
+
+The three V3 controls are intentionally sparse and state-backed: one purchase-order expedite, one 60-minute overtime authorization with its documented fatigue exposure, and one quality containment activation on supported profiles. Quality presents ordinary scrap separately from modeled latent customer escapes and containment workload. Maintenance presents current exposure and service history. These decisions remain compact controls inside their relevant engineering workspace and inherit the existing square panels, ruled tables, and restrained operational palette.
+
+Responsive behavior preserves the fixed factory plan as an internally scrollable physical map. Embedded order charts preserve their minimum readable row width through horizontal scrolling rather than expanding the page. Timeline secondary labels use the light charcoal-rail text token for readable contrast, and rejection meters carry equipment-specific accessible names.

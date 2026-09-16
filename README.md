@@ -30,11 +30,11 @@ First create the backend `.venv` and install `.[test]` using the WSL setup below
 cd plantops-core && source .venv/bin/activate && uvicorn plantops_sim.api:app --reload --host 127.0.0.1 --port 8010
 ```
 
-Then open the browser console at <http://localhost:5173>. The API's interactive Swagger documentation remains at <http://127.0.0.1:8010/docs>.
+Then open the browser console at <http://127.0.0.1:5173>. The API's interactive Swagger documentation remains at <http://127.0.0.1:8010/docs>.
 
 The API allows browser requests from `http://localhost:5173` and `http://127.0.0.1:5173` for local development.
 
-The frontend defaults to `http://127.0.0.1:8010`; copy `plantops-web/.env.example` to `plantops-web/.env` to override `VITE_API_BASE_URL` for frontend-only development. On first load it creates a seeded shift with seed 42 and pauses it so the engineer explicitly starts the shift. Playback advances one simulated minute per second at 1×, two at 2×, and four at 4×, then pauses at the 480-minute shift boundary. Requests are serialized; uncertain action responses stop playback and reconcile the server snapshot without automatically repeating chargeable decisions.
+The frontend defaults to `http://127.0.0.1:8010`; copy `plantops-web/.env.example` to `plantops-web/.env` to override `VITE_API_BASE_URL` for frontend-only development. On first load it creates a seeded shift with seed 42 and pauses it so the engineer explicitly starts the shift. Playback advances one simulated minute per second at 1×, two at 2×, and four at 4×, then pauses at the 480-minute shift boundary (540 when overtime was authorized). Requests are serialized; uncertain action responses stop playback and reconcile the server snapshot without automatically repeating chargeable decisions.
 
 Vite polls source changes because mounted Windows workspaces can miss native file events and otherwise serve stale modules. The strict frontend port remains 5173; API port 8000 is reserved for Coolify.
 
@@ -61,7 +61,7 @@ PM uses the existing engine: only idle, starved or blocked equipment may start; 
 
 `scenario_profile` contains a versioned ID, title, manager briefing, initial conditions, primary problem zone, machine role/fault mode/status, effective failure risk, PM availability/duration/cost, input/output buffer IDs, supplier terms, live alerts, capacity context, and `scene`. Scene zones contain actual unit counts, capacity, pallet counts and congestion; routes become active only while the associated machine runs, and expose waiting quantity and output-buffer blocking. Capacity identifies the configured bottleneck assets. Receiving exposes inbound units and uncovered demand; dispatch exposes allocation and at-risk order counts. Finished-goods scene stock means **unallocated** goods, while legacy `buffer_levels.finished` remains total good production. Carry-in WIP uses unique IDs ahead of future supplier receipts and is not counted as production until it passes Quality during this shift.
 
-The order board's “At risk” flag is an optimistic due-date/queue/cycle-time estimate, not a forecast. It excludes breakdown, scrap and receipt delays. Material-coverage alerts compare remaining demand against stock, in-process units and committed inbound material before scrap allowance. Current alerts and visual state are read-only projections: inspecting them never changes events, random streams or digests.
+The order board's “At risk” flag and forecast minute are optimistic due-date/queue/cycle-time estimates, not delivery promises. It excludes breakdown, scrap and receipt delays. Material-coverage alerts compare remaining demand against stock, in-process units and committed inbound material before scrap allowance. Current alerts and visual state are read-only projections: inspecting them never changes events, random streams or digests.
 
 ### Engineering workspaces
 
@@ -74,11 +74,11 @@ The permanent left rail opens eight useful views in the same session:
 | Production Plan | Demand versus output, ideal capacity, queues and order priority decisions |
 | Orders | Fulfillment, deadlines, risk, OTIF and priority input (0–100) |
 | Maintenance | Health, failure risk, downtime, emergency repairs and preventive plans |
-| Quality | Actual automatic inspection, yield and scrap disposition; read only |
+| Quality | Actual inspection, scrap, latent customer escapes and bounded containment activation |
 | Inventory | Storage, inbound material, supplier terms and purchase-order entry |
 | Reports | Interim/shift-end metrics, separate cost ledgers, open risks and actual engine action log |
 
-Priorities affect future allocations only and only break ties between identical due times. Procurement, priority changes and maintenance remain usable while paused. Quality containment submissions and inventory reconciliation are intentionally deferred: no form claims to save an unimplemented decision. There is no persistence beyond the in-memory API process, authentication, multiplayer or background simulation worker.
+Priorities affect future allocations only and only break ties between identical due times. Procurement, priority changes and maintenance remain usable while paused. Quality containment is available only on quality-containment profiles; manual inventory reconciliation remains deferred. There is no persistence beyond the in-memory API process, authentication, multiplayer or background simulation worker.
 
 Build the browser application with:
 
@@ -86,6 +86,73 @@ Build the browser application with:
 cd plantops-web
 npm run build
 ```
+
+## PlantOps V3 — Living Shift Operations
+
+The eight profile definitions and fixed building geometry are retained. Seeded sessions now own a `LivingShift` in `plantops-core/src/plantops_sim/living.py`. Classic `/simulate`, CLI, and sessions omitting `scenario_mode` keep their original simulation summary and reference event digest. The browser continues to request `scenario_mode: "seeded"`.
+
+### Live events and lifecycle
+
+Exactly three events are scheduled at shift creation using the isolated **`shift-events:v1`** RNG stream: minutes 45–85, 160–200 and 275–315. The primary profile selects the first event family; the other two are sampled without replacement. The schedule is inspectable at handover. Events have stable IDs, minute, effect-window end, kind, title, detail, severity, zone, workspace owner, affected IDs, lifecycle state and actual closing minute.
+
+| Event | Real engine consequence | Lifecycle |
+| --- | --- | --- |
+| Equipment condition warning | Removes 18 health points from the target equipment, increasing wear-based failure exposure | Active until actual service restores health, or expired at shift close |
+| Operator shortage | New cycles on the target station take 40% longer for 60 minutes; in-flight cycles retain their duration | Expires when the staffing window ends |
+| Transport disruption | Each open PO, and each PO placed during the 60-minute window, gains 25 transit minutes once | Resolves after the window and all affected receipts arrive; expires without affected POs or at close |
+| Customer escalation | An unfinished released order gains 15 priority points, capped at 100; earliest-due allocation still applies | Resolves when that order completes, otherwise expires at close; expires immediately if no order is eligible |
+| Quality notice | Only in quality-containment profiles: latent defect risk for units passing normal inspection rises from 6% to 12% for 60 minutes | Expires with the exposure window |
+
+Scheduled events activate only when simulated time reaches them. Starts, receipt delays, escalations, resolutions and expirations enter the event audit log. `closed_minute` records lifecycle closure; `end_minute` is the temporary effect window, not a promise that a persistent condition has cleared. Expiration does not undo lost health, changed priority or committed transit delays. No event is created during rendering or snapshot reads. The rail timeline combines scheduled/active events, actual order due times, expected receipts and recorded decisions.
+
+### Bounded decisions
+
+All three new commands require a seeded, still-open shift and work while paused. They return the full updated session snapshot. Unknown sessions/POs return **404**; unavailable, duplicate or closed-shift actions return **409**; missing, malformed or extra request fields return **422**. Failed actions consume no RNG, create no audit record and charge no cost.
+
+| POST `/sessions/{id}/actions/…` | JSON body | Modeled trade-off |
+| --- | --- | --- |
+| `expedite-purchase-order` | `{"purchase_order_id":"PO-000001"}` | Once per open PO: halves remaining scheduled transit time for **120** cost. Cancels the old receipt event. Original promise remains unchanged; later transport disruption can still delay receipt. Received POs cannot be expedited. |
+| `authorize-overtime` | `{}` | Once before shift close: extends 480 to **540 minutes**, committing **600** labor cost. At completion times in **[480, 540)**, effective per-unit failure probability is multiplied by **1.2**, capped at 1. Zero base failure risk stays zero. Normal-shift probabilities and customer due times do not change. |
+| `activate-containment` | `{}` | Once, on a quality-containment profile only: each subsequently started final-inspection cycle adds **0.6 minutes** and **2** cost and isolates modeled latent defects as scrap. Source rejection probability remains 14%. Already-started inspections and already-released output are not retroactively contained. |
+
+Containment adds an explicit latent-defect model on the independent **`quality:latent:v1`** stream. Among units passing ordinary final inspection, 6% (12% during a notice) carry a latent defect. Intensified inspection detects all such modeled latent defects; this is an explicit simplified detection assumption, not a cure for source defects. Without containment they enter finished goods. `customer_escapes` counts suspect unit IDs actually allocated to orders; `suspect_finished_units` counts those still unallocated. Captured latent defects are included in scrap. Extra inspection workload and cost are committed when an inspection starts, including an unfinished inspection at shift close.
+
+For compatibility, `good_production` and `quality` retain their **inspection-release** meanings and may include latent defects. Delivery OTIF measures quantity and deadline only and is not retroactively reduced by escapes; reports show escapes separately and flag them as quality exposure. The model does not include recalls, rework, warranty costs, defect root causes or financial revenue. Equipment rejection bars report observed attribution only.
+
+Seeded advancement is capped at the authorized shift end. Production does not start a new cycle at close, and subsequent interventions are rejected. Existing classic advancement semantics remain unchanged. All currency figures use the existing simulation cost units, with no implied currency or economic optimization score.
+
+### Snapshot and reporting contract
+
+- Seeded snapshots and `summary` expose `shift_events`, `overtime`, and `quality_containment`. Classic summaries omit those extensions.
+- Seeded `supply_summary.purchase_orders` additionally exposes `expedited`, `expedite_cost`, `expected_receipt_minute` and `supplier_late`. Expected arrival is the currently scheduled deterministic receipt; actual arrival stays null until receipt. Procurement cost excludes expediting.
+- Session `cost_breakdown` exposes `emergency_repair`, `preventive_maintenance`, `procurement`, `expediting`, `overtime`, `inspection` and their `total`, without double counting.
+- `timeline` projects event notices, commitments and decisions. `maintenance_history` projects actual failures, repairs and PM starts/completions. Both are read-only audit views.
+- `scenario_profile.decision_cards` has at most three concerns, measurable trade-offs, workspace, status and `decision_logged`. Automated customer escalation does not count as a player decision.
+- `scenario_profile.scene.order_forecasts` reports an optimistic remaining-load estimate in actual allocation order; the due-window diagram uses real releases, deadlines and the shift clock. It does not reserve machine capacity or predict stochastic failure, scrap, pipeline or supply delays.
+- `scenario_profile.shift_review` is provisional until the authorized close, then reports observed delivery, inspection yield, escapes, downtime, costs and event history alongside the actual player log. It does not infer counterfactual causality.
+
+The map, handover text, forecasts, queue/pallet symbols and management prose **display** engine data; they cannot change it. Overtime exposure, cycle slowdowns, health losses, receipt changes, inspection workload, defects, order priorities, inventory and costs are **simulated**. Layout, station silhouettes and walls remain fixed across seeds. There is no Settings workspace or external narrative engine.
+
+### Replay and verification
+
+Same seed plus the same ordered commands at the same simulated times reproduces the event sequence, summary, digest, decision board, timeline and review (session UUID is intentionally excluded). Snapshot reads do not create RNG streams or consume them. The historical classic digest regression remains pinned. Profile v2 initial-condition mappings remain stable; V3 seeded outcomes intentionally add the live-event and latent-quality model.
+
+From the repository root:
+
+```bash
+cd plantops-core
+source .venv/bin/activate
+python -m pip install -e ".[test]"
+python -m unittest discover -s tests -v
+cd ../plantops-web
+npm install
+npm run build
+npm run dev:full
+```
+
+Use **http://127.0.0.1:5173**, with API health at **http://127.0.0.1:8010/health** and docs at **http://127.0.0.1:8010/docs**. **Port 8000 is reserved for another local service.** If 5173 is occupied, the combined startup fails clearly; use or stop the existing PlantOps server before starting another. Do not change the port silently.
+
+V3 verification covers deterministic event variation and replay, snapshot/RNG immutability, classic compatibility, overtime boundaries and extra production, PO receipt cancellation and one-time charging, containment capture/escapes/workload, atomic invalid operations, API validation, decision/report reconciliation, TypeScript compilation and the absence of frontend `Math.random`. Session persistence, detailed labor rosters, root-cause defect categories and causal decision attribution remain outside this milestone.
 
 ## Production line
 

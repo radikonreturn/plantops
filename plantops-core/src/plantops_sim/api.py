@@ -4,10 +4,13 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .engine import (
     MAX_PURCHASE_QUANTITY,
+    ShiftActionUnavailableError,
+    UnknownPurchaseOrderError,
     InvalidPurchaseQuantityError,
     InvalidOrderPriorityError,
     MachineCannotStartPreventiveMaintenanceError,
@@ -220,3 +223,43 @@ def start_preventive_maintenance(
         PreventiveMaintenanceNotConfiguredError,
     ) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+class EmptyShiftActionRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+
+class ExpeditePurchaseOrderRequest(EmptyShiftActionRequest):
+    purchase_order_id: str = Field(strict=True, min_length=1)
+
+
+@app.exception_handler(ShiftActionUnavailableError)
+async def shift_conflict(_request: Any, exc: ShiftActionUnavailableError) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@app.exception_handler(UnknownPurchaseOrderError)
+async def unknown_po(_request: Any, exc: UnknownPurchaseOrderError) -> JSONResponse:
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+def run_living_action(session_id: str, action: str, po_id: str = "") -> dict[str, Any]:
+    try:
+        return session_manager.living_action(session_id, action, po_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/sessions/{session_id}/actions/expedite-purchase-order")
+def expedite_purchase_order(session_id: str, request: ExpeditePurchaseOrderRequest) -> dict[str, Any]:
+    return run_living_action(session_id, "expedite", request.purchase_order_id)
+
+
+@app.post("/sessions/{session_id}/actions/authorize-overtime")
+def authorize_overtime(session_id: str, request: EmptyShiftActionRequest) -> dict[str, Any]:
+    return run_living_action(session_id, "overtime")
+
+
+@app.post("/sessions/{session_id}/actions/activate-containment")
+def activate_containment(session_id: str, request: EmptyShiftActionRequest) -> dict[str, Any]:
+    return run_living_action(session_id, "containment")

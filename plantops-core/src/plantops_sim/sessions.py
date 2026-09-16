@@ -5,7 +5,8 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
-from .engine import ProductionLineSimulation
+from .engine import ProductionLineSimulation, ShiftActionUnavailableError
+from .living import LivingShift
 from .scenario import make_mvp_scenario
 from .profiles import CLASSIC_PROFILE, ShiftProfile, action_log, make_seeded_shift, profile_snapshot
 
@@ -75,6 +76,8 @@ class SessionManager:
             speed=speed,
             profile=profile,
         )
+        if scenario_mode == "seeded":
+            session.simulation.living = LivingShift(session.simulation, profile.primary_zone or "cnc_01")
         with self._lock:
             self._sessions[session.session_id] = session
             return self._snapshot(session)
@@ -115,6 +118,8 @@ class SessionManager:
     def expedite_repair(self, session_id: str, machine_id: str) -> dict[str, Any]:
         with self._lock:
             session = self._require_session(session_id)
+            if session.simulation.living:
+                session.simulation.living.require_open()
             session.simulation.expedite_repair(machine_id)
             session.intervention_cost += EMERGENCY_REPAIR_CALLOUT_COST
             return self._snapshot(session)
@@ -129,6 +134,8 @@ class SessionManager:
             maintenance_cost = session.simulation.preventive_maintenance_cost(
                 machine_id
             )
+            if session.simulation.living:
+                session.simulation.living.require_open()
             session.simulation.start_preventive_maintenance(machine_id)
             session.preventive_maintenance_cost += maintenance_cost
             return self._snapshot(session)
@@ -141,6 +148,8 @@ class SessionManager:
     ) -> dict[str, Any]:
         with self._lock:
             session = self._require_session(session_id)
+            if session.simulation.living:
+                session.simulation.living.require_open()
             session.simulation.reprioritize_order(order_id, priority)
             return self._snapshot(session)
 
@@ -152,7 +161,25 @@ class SessionManager:
     ) -> dict[str, Any]:
         with self._lock:
             session = self._require_session(session_id)
+            if session.simulation.living:
+                session.simulation.living.require_open()
             session.simulation.place_purchase_order(supplier_id, quantity)
+            return self._snapshot(session)
+
+    def living_action(self, session_id: str, action: str, po_id: str = "") -> dict[str, Any]:
+        with self._lock:
+            session = self._require_session(session_id)
+            living = session.simulation.living
+            if living is None:
+                raise ShiftActionUnavailableError("Living shift decisions require scenario_mode seeded")
+            if action == "overtime":
+                living.authorize_overtime()
+            elif action == "containment":
+                living.activate_containment()
+            elif action == "expedite":
+                living.expedite(po_id)
+            else:
+                raise ShiftActionUnavailableError("Unknown shift action")
             return self._snapshot(session)
 
     def _require_session(self, session_id: str) -> SimulationSession:
@@ -169,14 +196,55 @@ class SessionManager:
     @staticmethod
     def _snapshot(session: SimulationSession) -> dict[str, Any]:
         summary = session.simulation.summary()
+        profile = profile_snapshot(session.simulation, session.profile, summary)
+        living = session.simulation.living
+        costs = {
+            "emergency_repair": session.intervention_cost,
+            "preventive_maintenance": session.preventive_maintenance_cost,
+            "procurement": summary["supply_summary"]["procurement_committed_cost"],
+            "expediting": sum(living.expedited.values()) if living else 0,
+            "overtime": summary.get("overtime", {}).get("labor_cost", 0),
+            "inspection": summary.get("quality_containment", {}).get("inspection_cost", 0),
+        }
+        costs["total"] = round(sum(costs.values()), 2)
+        profile["shift_review"]["cost_breakdown"] = costs
+        profile["shift_review"]["scorecard"][-1] = {
+            "id": "cost", "label": "Total committed cost",
+            "status": "attention" if costs["total"] else "good",
+            "value": f"{costs['total']:.2f} material, maintenance, expediting, labor and inspection",
+        }
         return {
+            "maintenance_history": [
+                {"id": index, "minute": e.time, "kind": e.kind,
+                 "machine_id": e.machine_id, "detail": e.detail}
+                for index, e in enumerate(session.simulation.event_log)
+                if e.kind in {"MACHINE_FAILED", "REPAIR_COMPLETED", "REPAIR_EXPEDITED",
+                              "PLANNED_MAINTENANCE_STARTED", "PLANNED_MAINTENANCE_COMPLETED"}
+            ],
+            "cost_breakdown": costs,
+            "timeline": shift_timeline(session.simulation, summary),
+            **(living.snapshot() if living else {}),
             "session_id": session.session_id,
             "paused": session.paused,
             "speed": session.speed,
             "intervention_cost": session.intervention_cost,
             "preventive_maintenance_cost": session.preventive_maintenance_cost,
             "summary": summary,
-            "scenario_profile": profile_snapshot(session.simulation, session.profile, summary),
+            "scenario_profile": profile,
             "action_log": action_log(session.simulation),
             "event_digest": session.simulation.digest(),
         }
+
+
+def shift_timeline(simulation: ProductionLineSimulation, summary: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read-only commitments, live events and actual interventions."""
+    rows = [dict(id=f"due-{o['id']}", minute=o["due_minute"], title=f"{o['id']} due",
+                 state=o["status"], workspace="Orders") for o in summary["order_summary"]["orders"]]
+    rows += [dict(id=f"receipt-{po['id']}", minute=po.get("expected_receipt_minute", po["promised_receipt_minute"]),
+                  title=f"{po['id']} receipt", state=po["status"], workspace="Inventory")
+             for po in summary["supply_summary"]["purchase_orders"]]
+    rows += [dict(id=e["id"], minute=e["minute"], title=e["title"], state=e["state"], workspace=e["workspace"])
+             for e in summary.get("shift_events", [])]
+    rows += [dict(id=f"action-{a['id']}", minute=a["minute"], title=a["kind"].replace("_", " ").lower(),
+                  state="decision logged", workspace="Reports") for a in action_log(simulation)]
+    return sorted(rows, key=lambda row: (row["minute"], row["id"]))

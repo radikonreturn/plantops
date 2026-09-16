@@ -7,6 +7,7 @@ from collections import Counter
 from dataclasses import asdict
 from typing import Any
 
+from .living import LivingShift
 from .model import (
     Buffer,
     EventRecord,
@@ -28,6 +29,14 @@ MAX_PURCHASE_QUANTITY = 1_000
 
 class SimulationDomainError(Exception):
     """Base class for invalid simulation-domain operations."""
+
+
+class ShiftActionUnavailableError(SimulationDomainError):
+    """A bounded shift action is unavailable in the current state."""
+
+
+class UnknownPurchaseOrderError(SimulationDomainError):
+    """The requested purchase order does not exist."""
 
 
 class UnknownMachineError(SimulationDomainError):
@@ -110,6 +119,7 @@ class ProductionLineSimulation:
     """Authoritative discrete-event model for a sequential production line."""
 
     def __init__(self, scenario: Scenario, *, seed: int) -> None:
+        self.living: LivingShift | None = None
         self.scenario = scenario
         self.seed = seed
         self.clock = 0.0
@@ -317,6 +327,8 @@ class ProductionLineSimulation:
             machine.config.ideal_cycle_minutes - machine.config.cycle_jitter,
             machine.config.ideal_cycle_minutes + machine.config.cycle_jitter,
         ))
+        if self.living:
+            cycle = self.living.cycle_minutes(machine.config.id, unit_id, cycle)
         machine.state = MachineState.RUNNING
         machine.busy_unit = unit_id
         self._record("PROCESS_STARTED", machine.config.id, unit_id)
@@ -343,7 +355,12 @@ class ProductionLineSimulation:
         )
         machine.busy_unit = None
         machine.state = MachineState.IDLE
-        if machine.config.scrap_probability and self.rng.get(f"scrap:{machine.config.id}").random() < machine.config.scrap_probability:
+        rejected = bool(machine.config.scrap_probability and self.rng.get(f"scrap:{machine.config.id}").random() < machine.config.scrap_probability)
+        if self.living and not rejected:
+            rejected = self.living.latent_defect(machine.config.id, unit_id)
+        if self.living:
+            self.living.inspection_units.discard(unit_id)
+        if rejected:
             machine.scrap_units += 1
             self._record("UNIT_SCRAPPED", machine.config.id, unit_id)
         else:
@@ -371,12 +388,13 @@ class ProductionLineSimulation:
             )
             self._pending_repair_event_ids[machine.config.id] = repair_event_id
 
-    @staticmethod
-    def _effective_failure_probability(machine: Machine) -> float:
+    def _effective_failure_probability(self, machine: Machine) -> float:
         wear_fraction = (100.0 - machine.health) / 100.0
         multiplier = 1.0 + (
             machine.config.wear_based_failure_multiplier * wear_fraction
         )
+        if self.living and self.living.fatigue_active:
+            multiplier *= 1.2
         return min(1.0, machine.config.failure_probability * multiplier)
 
     def effective_failure_probability(self, machine_id: str) -> float:
@@ -525,11 +543,13 @@ class ProductionLineSimulation:
             total_committed_cost=round(quantity * supplier.unit_cost, 2),
         )
         self.purchase_orders[purchase_order.id] = purchase_order
-        self._schedule(
+        receipt_event_id = self._schedule(
             actual_receipt_minute,
             "MATERIAL_RECEIVED",
             purchase_order.id,
         )
+        if self.living:
+            self.living.register_receipt(purchase_order.id, actual_receipt_minute, receipt_event_id)
         self._record(
             "PURCHASE_ORDER_PLACED",
             detail=(
@@ -630,6 +650,10 @@ class ProductionLineSimulation:
                 f"Cannot move simulation time backwards from {self.clock} to {until_minutes}"
             )
 
+        if self.living:
+            until_minutes = min(until_minutes, self.living.end_minute)
+            if self.clock >= self.living.end_minute:
+                return self.summary()
         self._attempt_all_starts()
         while self._events and self._events[0][0] <= until_minutes:
             time, _, event_id, kind, target_id, unit_id = heapq.heappop(self._events)
@@ -637,7 +661,12 @@ class ProductionLineSimulation:
                 self._cancelled_event_ids.remove(event_id)
                 continue
             self.clock = time
-            if kind == "PROCESS_COMPLETED":
+            if kind in {"SHIFT_EVENT_START", "SHIFT_EVENT_END"}:
+                assert self.living is not None and target_id is not None
+                self.living.handle_event(kind, target_id)
+            elif kind == "OVERTIME_STARTED":
+                self._record("OVERTIME_STARTED", detail="failure_multiplier=1.2;labor_cost_already_committed=600")
+            elif kind == "PROCESS_COMPLETED":
                 machine = self.machines[target_id] if target_id else None
                 assert machine is not None and unit_id is not None
                 self._complete_process(machine, unit_id)
@@ -669,8 +698,13 @@ class ProductionLineSimulation:
                 self._complete_preventive_maintenance(machine)
             else:
                 raise RuntimeError(f"Unknown event type: {kind}")
-            self._attempt_all_starts()
+            if self.living:
+                self.living.reconcile()
+            if not self.living or self.clock < self.living.end_minute:
+                self._attempt_all_starts()
         self.clock = until_minutes
+        if self.living:
+            self.living.reconcile()
         return self.summary()
 
     def advance_by(self, minutes: float) -> dict[str, Any]:
@@ -681,7 +715,7 @@ class ProductionLineSimulation:
 
     def run(self, until_minutes: float | None = None) -> dict[str, Any]:
         """Run to a target time and retain the legacy completion event."""
-        until = self.scenario.shift_minutes if until_minutes is None else until_minutes
+        until = (self.living.end_minute if self.living else self.scenario.shift_minutes) if until_minutes is None else until_minutes
         self.advance_to(until)
         if not self._completion_recorded:
             self._record("SIMULATION_COMPLETED")
@@ -736,7 +770,8 @@ class ProductionLineSimulation:
         return {
             "seed": self.seed,
             "simulated_minutes": round(self.clock, 3),
-            "shift_minutes": self.scenario.shift_minutes,
+            "shift_minutes": self.living.end_minute if self.living else self.scenario.shift_minutes,
+            **(self.living.snapshot() if self.living else {}),
             "good_production": good,
             "scrap": quality_machine.scrap_units,
             "quality": round(quality, 4),
@@ -795,6 +830,11 @@ class ProductionLineSimulation:
             ),
             "purchase_orders": [
                 {
+                    **({"expedited": purchase_order.id in self.living.expedited,
+                        "expedite_cost": self.living.expedited.get(purchase_order.id, 0),
+                        "expected_receipt_minute": self.living.receipt_times[purchase_order.id],
+                        "supplier_late": self.living.receipt_times[purchase_order.id] > purchase_order.promised_receipt_minute}
+                       if self.living else {}),
                     "id": purchase_order.id,
                     "supplier_id": purchase_order.supplier_id,
                     "quantity": purchase_order.quantity,

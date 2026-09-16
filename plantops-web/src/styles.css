@@ -303,3 +303,16 @@ td strong { font-weight: 600; }
 .material-token rect { fill: #bfaa70; stroke: #796835; }
 .material-token path { fill: none; stroke: #796835; stroke-width: 3; }
 .map-concern { border-top: 1px solid var(--line); padding: 9px 14px; font-size: 12px; color: #654717; background: #eee5d1; }
+
+.timeline-track button { padding: 0; min-height: 28px; border: 0; background: transparent; color: inherit; text-align: left; font-size: 11px; }
+.timeline-track small { display: block; color: #b9c9c9; opacity: 1; }
+.commitment-chart { overflow-x: auto; padding: 12px 16px; border-bottom: 1px solid var(--line, #bfc4ba); }
+.commitment-row { min-width: 344px; display: grid; grid-template-columns: 110px minmax(120px, 1fr) 90px; gap: 12px; align-items: center; margin: 10px 0; font-size: 12px; }
+.commitment-track { position: relative; height: 18px; background: #e1ded3; overflow: hidden; }
+.commitment-window { position: absolute; height: 8px; top: 5px; background: #466b7b; }
+.commitment-track i { position: absolute; top: 0; height: 18px; border-left: 2px solid #993f35; }
+.defect-row { display: flex; gap: 16px; align-items: center; margin: 10px 0; }
+.defect-row meter { width: 200px; }
+.map-events { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 14px; font-size: 12px; }
+.map-alert.critical circle { fill: #993f35; }
+.map-alert.critical text { fill: #fff; }
