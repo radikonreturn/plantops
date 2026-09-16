@@ -1,0 +1,323 @@
+From 56e0257eafcfa6b56b6cc226b887b9dcca92d5db Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Wed, 16 Sep 2026 12:41:57 -0400
+Subject: [PATCH] feat: add state-backed shift decision loop
+
+---
+ plantops-core/src/plantops_sim/profiles.py | 157 +++++++++++++++++++++
+ plantops-core/tests/test_profiles.py       |  16 +++
+ plantops-web/src/styles.css                |  27 ++++
+ plantops-web/src/types.ts                  |  13 ++
+ plantops-web/src/views/InboxView.tsx       |   1 +
+ plantops-web/src/views/ReportsView.tsx     |   2 +
+ 6 files changed, 216 insertions(+)
+
+diff --git a/plantops-core/src/plantops_sim/profiles.py b/plantops-core/src/plantops_sim/profiles.py
+index 81990c2..8b27c61 100644
+--- a/plantops-core/src/plantops_sim/profiles.py
++++ b/plantops-core/src/plantops_sim/profiles.py
+@@ -243,6 +243,8 @@ def profile_snapshot(
+                                              if s.ideal_cycle_minutes == bottleneck_cycle],
+                      "ideal_shift_units": int(scenario.shift_minutes / bottleneck_cycle),
+                      "estimate_note": "Ideal capacity only; excludes failures, scrap, starvation and carried-in WIP."},
++        "decision_cards": decision_cards(simulation, profile, summary, machines, risks),
++        "shift_review": shift_review(simulation, profile, summary, alerts),
+     }
+ 
+ 
+@@ -254,3 +256,158 @@ def action_log(simulation: ProductionLineSimulation) -> list[dict[str, Any]]:
+          "machine_id": event.machine_id, "detail": event.detail}
+         for index, event in enumerate(simulation.event_log) if event.kind in kinds
+     ]
++
++
++def decision_cards(
++    simulation: ProductionLineSimulation,
++    profile: ShiftProfile,
++    summary: dict[str, Any],
++    machines: list[dict[str, Any]],
++    risks: dict[str, str],
++) -> list[dict[str, str]]:
++    """Three compact, state-backed decision prompts for the current shift.
++
++    These are not scripted quests: their status reflects actions and operational state
++    in this simulation session. They deliberately describe the decision, not a "right"
++    answer, because trade-offs are the point of the game.
++    """
++    action_kinds = {event.kind for event in simulation.event_log}
++    cards: list[dict[str, str]] = []
++    machine = next((item for item in machines if item["id"] == profile.primary_zone), None)
++
++    if machine and machine["maintenance_available"]:
++        completed = any(
++            event.kind == "PLANNED_MAINTENANCE_STARTED" and event.machine_id == machine["id"]
++            for event in simulation.event_log
++        )
++        cards.append({
++            "id": "protect-asset",
++            "title": f"Decide on {machine['name']}",
++            "detail": (
++                f"{machine['fault_mode']}. {machine['attention_reason'] or 'Review health, queue and delivery exposure before acting.'} "
++                "Planned service consumes time and cost but restores equipment health."
++            ),
++            "workspace": "Maintenance",
++            "status": "decision logged" if completed else "open decision",
++        })
++    elif profile.primary_zone == "raw":
++        supplied = "PURCHASE_ORDER_PLACED" in action_kinds
++        uncovered = summary["supply_summary"]["inbound_units"] + summary["supply_summary"]["raw_material_on_hand"]
++        cards.append({
++            "id": "secure-material",
++            "title": "Secure material coverage",
++            "detail": (
++                f"The line has {uncovered} units of available or inbound material. "
++                "A purchase order protects continuity, but commits cost and may arrive late."
++            ),
++            "workspace": "Inventory",
++            "status": "decision logged" if supplied else "open decision",
++        })
++    elif profile.primary_zone == "quality_01":
++        cards.append({
++            "id": "contain-quality",
++            "title": "Plan for quality containment",
++            "detail": (
++                "The final-inspection lot has elevated rejection risk. There is no manual release override; "
++                "use the quality and order views to protect customer commitments before scrap materializes."
++            ),
++            "workspace": "Quality",
++            "status": "monitor live yield",
++        })
++    elif profile.primary_zone == "dispatch":
++        reprioritized = "ORDER_PRIORITY_CHANGED" in action_kinds
++        cards.append({
++            "id": "protect-dispatch",
++            "title": "Choose a dispatch priority",
++            "detail": (
++                "Orders share a delivery window. Priority changes the allocation order when finished goods are scarce; "
++                "it can protect one customer while exposing another."
++            ),
++            "workspace": "Orders",
++            "status": "decision logged" if reprioritized else "open decision",
++        })
++
++    upcoming = next(
++        (order for order in sorted(summary["order_summary"]["orders"], key=lambda item: (item["due_minute"], item["id"]))
++         if order["remaining_quantity"] > 0),
++        None,
++    )
++    if upcoming:
++        cards.append({
++            "id": "protect-customer",
++            "title": f"Protect {upcoming['id']}",
++            "detail": (
++                f"{upcoming['remaining_quantity']} units remain due at minute {upcoming['due_minute']}. "
++                f"Current delivery outlook: {risks[upcoming['id']].lower()}."
++            ),
++            "workspace": "Orders",
++            "status": risks[upcoming["id"]].lower(),
++        })
++
++    cards.append({
++        "id": "verify-floor",
++        "title": "Verify the live constraint",
++        "detail": (
++            "Inspect queue levels, station health and line state before committing a response. "
++            "The same handover category can develop differently as the shift runs."
++        ),
++        "workspace": "Plant View",
++        "status": "live",
++    })
++    return cards[:3]
++
++
++def shift_review(
++    simulation: ProductionLineSimulation,
++    profile: ShiftProfile,
++    summary: dict[str, Any],
++    alerts: list[dict[str, str]],
++) -> dict[str, Any]:
++    """Evidence-based management review for interim and completed shifts."""
++    order_summary = summary["order_summary"]
++    metrics = summary["machine_metrics"]
++    final = simulation.clock >= simulation.scenario.shift_minutes
++    failures = sum(metric["failures"] for metric in metrics.values())
++    downtime = sum(metric["unplanned_downtime_minutes"] for metric in metrics.values())
++    committed_procurement = summary["supply_summary"]["procurement_committed_cost"]
++    quality = summary["quality"]
++    due = order_summary["orders_due"]
++    otif = order_summary["otif"]
++    delivery_status = (
++        "good" if (due == 0 or (otif is not None and otif >= 0.95))
++        else "attention" if otif is not None and otif >= 0.70 else "critical"
++    )
++    if not final and any(alert["zone"] == "dispatch" for alert in alerts):
++        delivery_status = "attention"
++    quality_status = "good" if quality >= 0.97 else "attention" if quality >= 0.90 else "critical"
++    resilience_status = "good" if failures == 0 else "attention" if failures <= 2 else "critical"
++    cost_status = "good" if committed_procurement == 0 else "attention"
++    delivery_value = (
++        f"OTIF {otif:.0%} across {due} due orders" if due and otif is not None
++        else ("No customer order due yet" if not final else "No customer order became due")
++    )
++    actions = action_log(simulation)
++    if final:
++        headline = "Shift review: delivery protected" if delivery_status == "good" else "Shift review: customer exposure remains"
++        conclusion = (
++            "The review records observed outcomes; it does not infer that one action alone caused them. "
++            "Use the action log together with the machine and order history in the next shift handover."
++        )
++    else:
++        headline = "Interim management review"
++        conclusion = "This is a live readout. Delivery and quality outcomes are final only at shift close."
++    return {
++        "state": "final" if final else "interim",
++        "headline": headline,
++        "conclusion": conclusion,
++        "actions_recorded": len(actions),
++        "scorecard": [
++            {"id": "delivery", "label": "Customer delivery", "status": delivery_status, "value": delivery_value},
++            {"id": "quality", "label": "Quality yield", "status": quality_status,
++             "value": f"{quality:.1%} observed yield · {summary['scrap']} scrap"},
++            {"id": "resilience", "label": "Equipment resilience", "status": resilience_status,
++             "value": f"{failures} failure(s) · {downtime:.1f} unplanned min"},
++            {"id": "cost", "label": "Procurement commitment", "status": cost_status,
++             "value": f"{committed_procurement:.2f} committed material cost"},
++        ],
++    }
+diff --git a/plantops-core/tests/test_profiles.py b/plantops-core/tests/test_profiles.py
+index 0ed1127..041579b 100644
+--- a/plantops-core/tests/test_profiles.py
++++ b/plantops-core/tests/test_profiles.py
+@@ -27,6 +27,22 @@ class ScenarioProfileTests(unittest.TestCase):
+             for key in ("scenario_profile", "summary", "event_digest", "action_log"):
+                 self.assertEqual(first[key], second[key])
+ 
++    def test_decision_board_and_shift_review_are_state_backed_and_deterministic(self):
++        first, second = self.create(), self.create()
++        for snapshot in (first, second):
++            profile = snapshot["scenario_profile"]
++            self.assertEqual(len(profile["decision_cards"]), 3)
++            self.assertEqual(profile["shift_review"]["state"], "interim")
++            self.assertEqual(len(profile["shift_review"]["scorecard"]), 4)
++            self.assertTrue(all(card["workspace"] for card in profile["decision_cards"]))
++        self.assertEqual(first["scenario_profile"]["decision_cards"], second["scenario_profile"]["decision_cards"])
++        self.manager.advance_session(first["session_id"], 480)
++        finished = self.manager.get_session(first["session_id"])
++        review = finished["scenario_profile"]["shift_review"]
++        self.assertEqual(review["state"], "final")
++        self.assertIn("Shift review", review["headline"])
++        self.assertEqual(review["actions_recorded"], len(finished["action_log"]))
++
+     def test_different_seeds_produce_materially_different_shifts(self):
+         profiles = [self.create(seed)["scenario_profile"] for seed in range(80)]
+         self.assertEqual(len({p["id"] for p in profiles}), 8)
+diff --git a/plantops-web/src/styles.css b/plantops-web/src/styles.css
+index de42136..0360ce0 100644
+--- a/plantops-web/src/styles.css
++++ b/plantops-web/src/styles.css
+@@ -188,6 +188,15 @@ td strong { font-weight: 600; }
+ .task-list li > div { flex: 1; }
+ .task-list strong { font-size: 12px; }
+ .task-list p { margin: 5px 0 0; }
++.section-title { display: flex; justify-content: space-between; align-items: baseline; gap: 18px; border-bottom: 1px solid var(--line); }
++.section-title h2 { margin-bottom: 5px; }
++.section-title p { margin: 0 0 12px; }
++.section-title > span { white-space: nowrap; color: var(--muted); font-size: 11px; }
++.decision-list { list-style: none; padding: 0; margin: 0; }
++.decision-list li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--line); }
++.decision-list p { margin: 5px 0; }
++.decision-list small { display: inline-block; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
++.decision-number { width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid #8d9a91; color: #4c6157; font-size: 11px; font-variant-numeric: tabular-nums; }
+ .readings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 22px; margin: 16px 0; font-variant-numeric: tabular-nums; }
+ .readings > div { padding: 10px 0; border-bottom: 1px solid var(--line); }
+ .readings dt { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+@@ -204,6 +213,19 @@ td strong { font-weight: 600; }
+ .purchase-form .field { width: 150px; flex-shrink: 0; margin: 0; }
+ .purchase-form > span { flex: 1; font-size: 12px; }
+ .report-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 40px; }
++.manager-review { display: flex; justify-content: space-between; gap: 24px; padding: 20px 0; border-bottom: 1px solid var(--line); }
++.manager-review h2 { margin: 6px 0 8px; font-size: 20px; font-weight: 550; }
++.manager-review p { margin: 0; }
++.eyebrow { color: var(--muted); font-size: 10px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
++.review-actions { align-self: flex-start; white-space: nowrap; border: 1px solid var(--line); padding: 8px 10px; font-size: 10px; color: var(--muted); }
++.review-scorecard { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--line); margin-bottom: 26px; }
++.review-metric { padding: 15px 16px; min-height: 88px; border-right: 1px solid var(--line); }
++.review-metric:last-child { border-right: 0; }
++.review-metric > span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 9px; }
++.review-metric > strong { display: block; font-size: 12px; line-height: 1.45; font-weight: 550; }
++.review-metric.good { border-top: 3px solid #54826b; }
++.review-metric.attention { border-top: 3px solid #af8427; }
++.review-metric.critical { border-top: 3px solid #ad5550; }
+ .report-readings { margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+ .report-readings > div { display: flex; justify-content: space-between; gap: 24px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+ .report-readings dd { font-weight: 600; text-align: right; }
+@@ -242,6 +264,9 @@ td strong { font-weight: 600; }
+   .section-heading, .view-heading { flex-wrap: wrap; }
+   .office-view { padding: 16px; }
+   .report-grid { grid-template-columns: 1fr; gap: 24px; }
++  .manager-review { flex-wrap: wrap; }
++  .review-scorecard { grid-template-columns: repeat(2, minmax(0, 1fr)); }
++  .review-metric:nth-child(2) { border-right: 0; }
+   .purchase-form { flex-wrap: wrap; }
+   .map-footer { flex-direction: column; }
+ }
+@@ -261,6 +286,8 @@ td strong { font-weight: 600; }
+   .left-rail nav button { width: auto; flex-shrink: 0; }
+   .workspace-content { padding: 0 8px 18px; }
+   .maintenance-row .readings { grid-template-columns: repeat(2, 1fr); }
++  .decision-list li { grid-template-columns: 28px minmax(0, 1fr); }
++  .decision-list button { grid-column: 2; justify-self: start; }
+ }
+ @media (prefers-reduced-motion: reduce) { .conveyor-flow.active { animation: none; } }
+ 
+diff --git a/plantops-web/src/types.ts b/plantops-web/src/types.ts
+index f01b860..2b9f89f 100644
+--- a/plantops-web/src/types.ts
++++ b/plantops-web/src/types.ts
+@@ -167,5 +167,18 @@ export interface ScenarioProfile {
+     dispatch: {allocated_units: number; at_risk_orders: number};
+     order_risks: Record<string, string>};
+   capacity: {bottleneck_cycle_minutes: number; bottleneck_machines: string[]; ideal_shift_units: number; estimate_note: string};
++  decision_cards: DecisionCard[];
++  shift_review: ShiftReview;
+ }
+ export interface ActionRecord {id: number; minute: number; kind: string; machine_id: string | null; detail: string}
++export interface DecisionCard {
++  id: string; title: string; detail: string; workspace: Workspace;
++  status: string;
++}
++export interface ShiftReview {
++  state: "interim" | "final";
++  headline: string;
++  conclusion: string;
++  actions_recorded: number;
++  scorecard: {id: string; label: string; status: "good" | "attention" | "critical"; value: string}[];
++}
+diff --git a/plantops-web/src/views/InboxView.tsx b/plantops-web/src/views/InboxView.tsx
+index e0d4691..a47e379 100644
+--- a/plantops-web/src/views/InboxView.tsx
++++ b/plantops-web/src/views/InboxView.tsx
+@@ -4,6 +4,7 @@ export function InboxView({session, navigate}: {session: SessionSnapshot; naviga
+   const profile = session.scenario_profile;
+   return <div className="office-view"><div className="view-heading"><h1>Office / Inbox</h1><span>Shift handover · {clock(session.summary.simulated_minutes)}</span></div>
+     <article className="briefing-letter"><div className="memo-meta"><span>From: Shift manager</span><span>To: Industrial engineering</span><span>00:00 · Handover</span></div><h2>{profile.title}</h2><p>{profile.briefing}</p><p>Starting condition: {profile.initial_conditions.raw_units} steel blanks, {Object.values(profile.initial_conditions.wip).reduce((a, b) => a + b, 0)} carried-in WIP units. Primary handover area: {profile.machines.find(m => m.id === profile.primary_zone)?.name ?? profile.primary_zone ?? "Component line"}.</p><button onClick={() => navigate("Plant View")}>Inspect the line</button></article>
++    <section className="work-section decision-board"><div className="section-title"><div><h2>Decision board</h2><p>Three live prompts for this shift. They record the real plant state and your decisions; there is no preset “correct” move.</p></div><span>{profile.shift_review.actions_recorded} action{profile.shift_review.actions_recorded === 1 ? "" : "s"} logged</span></div><ol className="decision-list">{profile.decision_cards.map((card, index) => <li key={card.id}><span className="decision-number">{index + 1}</span><div><strong>{card.title}</strong><p>{card.detail}</p><small>{card.status}</small></div><button onClick={() => navigate(card.workspace)}>Open {card.workspace}</button></li>)}</ol></section>
+     <section className="work-section"><h2>Current engineering tasks</h2><p>Tasks follow live operational concerns. They clear as the underlying condition changes.</p><ul className="task-list">{profile.active_alerts.map(alert => <li key={alert.id}><span className={`signal ${alert.severity}`}/><div><strong>{alert.workspace}</strong><p>{alert.message}</p></div><button onClick={() => navigate(alert.workspace)}>Review</button></li>)}</ul>{!profile.active_alerts.length && <p>No active exceptions. Monitor delivery progress as the shift advances.</p>}</section>
+     <section className="work-section"><h2>Production-control note</h2><p>Priorities decide ties between orders with the same due time. Material is allocated automatically from finished goods. All costs and decisions remain attached to this shift.</p></section>
+   </div>;
+diff --git a/plantops-web/src/views/ReportsView.tsx b/plantops-web/src/views/ReportsView.tsx
+index d5374ce..357469e 100644
+--- a/plantops-web/src/views/ReportsView.tsx
++++ b/plantops-web/src/views/ReportsView.tsx
+@@ -12,6 +12,8 @@ export function ReportsView({session}: {session: SessionSnapshot}) {
+     ["Procurement committed cost", money(s.supply_summary.procurement_committed_cost)],
+   ];
+   return <div className="office-view"><div className="view-heading"><h1>Reports</h1><span>{s.simulated_minutes >= s.shift_minutes ? "Shift-end report" : "Interim shift report"} · {clock(s.simulated_minutes)}</span></div>
++    <section className="manager-review"><div><span className="eyebrow">{session.scenario_profile.shift_review.state === "final" ? "Management close-out" : "Management checkpoint"}</span><h2>{session.scenario_profile.shift_review.headline}</h2><p>{session.scenario_profile.shift_review.conclusion}</p></div><span className="review-actions">{session.scenario_profile.shift_review.actions_recorded} decision{session.scenario_profile.shift_review.actions_recorded === 1 ? "" : "s"} recorded</span></section>
++    <div className="review-scorecard">{session.scenario_profile.shift_review.scorecard.map(item => <section className={`review-metric ${item.status}`} key={item.id}><span>{item.label}</span><strong>{item.value}</strong></section>)}</div>
+     <h2>{session.scenario_profile.title}</h2><div className="report-grid"><dl className="report-readings">{rows.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value}</dd></div>)}</dl><section><h2>Open risks at report time</h2>{session.scenario_profile.active_alerts.map(alert => <p key={alert.id}>{alert.message}</p>)}{!session.scenario_profile.active_alerts.length && <p>No active concerns.</p>}<p className="table-note">OTIF includes only due orders and counts those completed by their deadline. No due orders means no score. Summed machine downtime is not line downtime.</p></section></div>
+     <section className="work-section"><h2>Equipment performance</h2><div className="table-scroll"><table><thead><tr><th>Machine</th><th>Processed</th><th>Health</th><th>Failures</th><th>Unplanned stop</th><th>Planned stop</th><th>Availability</th></tr></thead><tbody>{session.scenario_profile.machines.map(asset => {const m = s.machine_metrics[asset.id]; return <tr key={asset.id}><td>{asset.name}</td><td>{m.processed}</td><td>{m.health.toFixed(1)}</td><td>{m.failures}</td><td>{m.unplanned_downtime_minutes.toFixed(1)} min</td><td>{m.planned_maintenance_minutes.toFixed(1)} min</td><td>{percent(m.availability)}</td></tr>;})}</tbody></table></div></section>
+     <section className="work-section"><h2>Player action log</h2><div className="table-scroll"><table><thead><tr><th>Minute</th><th>Action</th><th>Asset / detail</th></tr></thead><tbody>{session.action_log.map(action => <tr key={action.id}><td>{action.minute.toFixed(1)}</td><td>{label(action.kind)}</td><td className="log-detail">{action.machine_id ? `${action.machine_id} · ` : ""}{action.detail || "Emergency crew completed the repair."}</td></tr>)}{!session.action_log.length && <tr><td colSpan={3}>No production decisions recorded yet.</td></tr>}</tbody></table></div></section>
+-- 
+2.51.1
+
