@@ -167,5 +167,18 @@ export interface ScenarioProfile {
     dispatch: {allocated_units: number; at_risk_orders: number};
     order_risks: Record<string, string>};
   capacity: {bottleneck_cycle_minutes: number; bottleneck_machines: string[]; ideal_shift_units: number; estimate_note: string};
+  decision_cards: DecisionCard[];
+  shift_review: ShiftReview;
 }
 export interface ActionRecord {id: number; minute: number; kind: string; machine_id: string | null; detail: string}
+export interface DecisionCard {
+  id: string; title: string; detail: string; workspace: Workspace;
+  status: string;
+}
+export interface ShiftReview {
+  state: "interim" | "final";
+  headline: string;
+  conclusion: string;
+  actions_recorded: number;
+  scorecard: {id: string; label: string; status: "good" | "attention" | "critical"; value: string}[];
+}

@@ -27,6 +27,22 @@ class ScenarioProfileTests(unittest.TestCase):
             for key in ("scenario_profile", "summary", "event_digest", "action_log"):
                 self.assertEqual(first[key], second[key])
 
+    def test_decision_board_and_shift_review_are_state_backed_and_deterministic(self):
+        first, second = self.create(), self.create()
+        for snapshot in (first, second):
+            profile = snapshot["scenario_profile"]
+            self.assertEqual(len(profile["decision_cards"]), 3)
+            self.assertEqual(profile["shift_review"]["state"], "interim")
+            self.assertEqual(len(profile["shift_review"]["scorecard"]), 4)
+            self.assertTrue(all(card["workspace"] for card in profile["decision_cards"]))
+        self.assertEqual(first["scenario_profile"]["decision_cards"], second["scenario_profile"]["decision_cards"])
+        self.manager.advance_session(first["session_id"], 480)
+        finished = self.manager.get_session(first["session_id"])
+        review = finished["scenario_profile"]["shift_review"]
+        self.assertEqual(review["state"], "final")
+        self.assertIn("Shift review", review["headline"])
+        self.assertEqual(review["actions_recorded"], len(finished["action_log"]))
+
     def test_different_seeds_produce_materially_different_shifts(self):
         profiles = [self.create(seed)["scenario_profile"] for seed in range(80)]
         self.assertEqual(len({p["id"] for p in profiles}), 8)
