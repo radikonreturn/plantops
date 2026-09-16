@@ -145,11 +145,18 @@ class ProductionLineSimulation:
         self.finished_goods = finished_goods
         for unit_id in range(1, scenario.raw_material_units + 1):
             self.buffers["raw"].put(unit_id)
+        # Carry-in WIP belongs to the preceding shift, with distinct unit IDs.
+        for buffer_id, quantity in scenario.initial_wip:
+            for _ in range(quantity):
+                self.buffers[buffer_id].put(self._next_raw_unit_id)
+                self._next_raw_unit_id += 1
         self.machines: dict[str, Machine] = {}
         previous_buffer = "raw"
         for index, stage in enumerate(scenario.stages):
             output = "finished" if index == len(scenario.stages) - 1 else f"after_{stage.id}"
-            self.machines[stage.id] = Machine(stage, previous_buffer, output)
+            self.machines[stage.id] = Machine(
+                stage, previous_buffer, output, health=stage.initial_health
+            )
             previous_buffer = output
         self.orders: dict[str, OrderState] = {}
         self._urgent_order_id: str | None = None

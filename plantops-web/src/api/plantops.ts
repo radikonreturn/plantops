@@ -6,7 +6,7 @@ import type {
 
 const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
 export const API_BASE_URL = (
-  configuredBaseUrl || "http://127.0.0.1:8000"
+  configuredBaseUrl || "http://127.0.0.1:8010"
 ).replace(/\/$/, "");
 
 interface ErrorDetail {
@@ -45,10 +45,14 @@ function errorMessage(payload: ErrorPayload | null, status: number): string {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
+    signal: init?.signal ?? AbortSignal.timeout(15000),
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...init?.headers,
     },
+  }).catch((error: unknown) => {
+    throw new Error(`Cannot reach PlantOps at ${API_BASE_URL} for ${init?.method ?? "GET"} ${path}. ` +
+      `Check that dev:full is running. ${error instanceof Error ? error.message : "Connection failed."}`);
   });
 
   if (!response.ok) {

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from .engine import ProductionLineSimulation
 from .scenario import make_mvp_scenario
+from .profiles import CLASSIC_PROFILE, ShiftProfile, action_log, make_seeded_shift, profile_snapshot
 
 
 ALLOWED_SPEEDS = frozenset({1, 2, 4})
@@ -31,6 +32,7 @@ class SimulationSession:
     speed: int = 1
     intervention_cost: float = 0.0
     preventive_maintenance_cost: float = 0.0
+    profile: ShiftProfile = CLASSIC_PROFILE
 
     def __post_init__(self) -> None:
         if type(self.speed) is not int or self.speed not in ALLOWED_SPEEDS:
@@ -50,17 +52,24 @@ class SessionManager:
         seed: int = 42,
         failures_enabled: bool = True,
         speed: int = 1,
+        scenario_mode: str = "classic",
     ) -> dict[str, Any]:
         self._validate_speed(speed)
+        if scenario_mode not in {"classic", "seeded"}:
+            raise ValueError("Scenario mode must be classic or seeded")
         scenario = (
             make_mvp_scenario()
             if failures_enabled
             else make_mvp_scenario(cnc_failure_probability=0)
         )
+        profile = CLASSIC_PROFILE
+        if scenario_mode == "seeded":
+            scenario, profile = make_seeded_shift(scenario, seed)
         session = SimulationSession(
             session_id=str(uuid4()),
             simulation=ProductionLineSimulation(scenario, seed=seed),
             speed=speed,
+            profile=profile,
         )
         with self._lock:
             self._sessions[session.session_id] = session
@@ -155,12 +164,15 @@ class SessionManager:
 
     @staticmethod
     def _snapshot(session: SimulationSession) -> dict[str, Any]:
+        summary = session.simulation.summary()
         return {
             "session_id": session.session_id,
             "paused": session.paused,
             "speed": session.speed,
             "intervention_cost": session.intervention_cost,
             "preventive_maintenance_cost": session.preventive_maintenance_cost,
-            "summary": session.simulation.summary(),
+            "summary": summary,
+            "scenario_profile": profile_snapshot(session.simulation, session.profile, summary),
+            "action_log": action_log(session.simulation),
             "event_digest": session.simulation.digest(),
         }

@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node ./node_modules/vite/bin/vite.js",
-    "dev:api": "bash -lc 'cd ../plantops-core && source .venv/bin/activate && uvicorn plantops_sim.api:app --reload --host 127.0.0.1 --port 8000'",
-    "dev:full": "concurrently --kill-others --names API,WEB --prefix-colors blue,green \"npm:dev:api\" \"npm:dev\"",
+    "dev:api": "bash -c 'cd ../plantops-core && source .venv/bin/activate && exec uvicorn plantops_sim.api:app --reload --host 127.0.0.1 --port 8010'",
+    "dev:full": "VITE_API_BASE_URL=http://127.0.0.1:8010 concurrently --kill-others --names API,WEB --prefix-colors blue,green \"npm:dev:api\" \"npm:dev\"",
     "build": "node ./node_modules/typescript/bin/tsc -b && node ./node_modules/vite/bin/vite.js build",
     "preview": "node ./node_modules/vite/bin/vite.js preview"
   },

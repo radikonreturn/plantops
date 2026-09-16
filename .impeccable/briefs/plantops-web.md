@@ -10,9 +10,9 @@ A production dispatch board fused with a top-down factory routing plan. The inte
 
 ## First viewport
 
-- Persistent control strip: plant identity, shift clock, playback controls, replay seed, and six primary KPIs.
+- Compact control strip: plant identity, shift clock, playback controls, small operational KPIs, and New Shift. Replay seed lives in an advanced dialog section.
 - Dominant factory-floor map: raw warehouse through CNC, Wash, Assembly, Quality, and finished goods.
-- Operations rail: selected equipment actions, procurement, costs, and alerts.
+- Permanent left rail: timeline, live concerns and eight engineering workspaces. No permanent right inspector.
 - Order dispatch board below the map on desktop.
 
 ## Signature
@@ -33,4 +33,4 @@ The assigned production-traveler/dispatch-board concept is the committed directi
 
 ## Responsive behavior
 
-Desktop is authoritative. Below 1100 px, factory floor, operations, and orders stack. The production line remains a horizontally scrollable spatial model instead of collapsing into generic cards.
+Desktop is authoritative. The 1220-unit SVG map fits the full central workspace at 1440 px; at narrow widths it scrolls internally. Office screens replace the central canvas within the same shell. Equipment details use a temporary keyboard-accessible dialog. The left rail becomes a horizontal workspace strip on phones.

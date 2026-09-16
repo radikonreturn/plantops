@@ -123,10 +123,43 @@ export interface SessionSnapshot {
   preventive_maintenance_cost: number;
   summary: SimulationSummary;
   event_digest: string;
+  scenario_profile: ScenarioProfile;
+  action_log: ActionRecord[];
 }
 
 export interface CreateSessionInput {
   seed: number;
   failures_enabled: boolean;
   speed: PlaybackSpeed;
+  scenario_mode?: "classic" | "seeded";
 }
+
+export const workspaces = ["Plant View", "Office / Inbox", "Production Plan", "Orders", "Maintenance", "Quality", "Inventory", "Reports"] as const;
+export type Workspace = typeof workspaces[number];
+export interface OperationalAlert {
+  id: string; zone: string; severity: "info" | "attention" | "critical";
+  message: string; workspace: Workspace;
+}
+export interface SceneZone {
+  id: string; units: number; capacity: number | null;
+  pallets: number; units_per_pallet: number; congested: boolean;
+}
+export interface AssetConfig {
+  id: string; name: string; ideal_cycle_minutes: number; failure_risk: number;
+  maintenance_duration: number; maintenance_cost: number; scrap_probability: number;
+  input_buffer: string; output_buffer: string;
+}
+export interface Supplier {
+  id: string; name: string; min_lead_minutes: number; max_lead_minutes: number;
+  late_probability: number; max_delay_minutes: number; unit_cost: number;
+}
+export interface ScenarioProfile {
+  id: string; title: string; briefing: string; active_alerts: OperationalAlert[];
+  machines: AssetConfig[]; suppliers: Supplier[];
+  initial_conditions: {raw_units: number; wip: Record<string, number>; machine_health: Record<string, number>};
+  scene: {zones: SceneZone[]; highlighted_zone: string | null;
+    routes: {id: string; from: string; to: string; active: boolean}[];
+    order_risks: Record<string, string>};
+  capacity: {bottleneck_cycle_minutes: number; ideal_shift_units: number; estimate_note: string};
+}
+export interface ActionRecord {id: number; minute: number; kind: string; machine_id: string | null; detail: string}

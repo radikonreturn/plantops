@@ -1,163 +1,39 @@
-import type { BufferLevels, MachineMetric } from "../types";
+import type { SessionSnapshot } from "../types";
+import { FactoryZones, Pallets } from "./FactoryZones";
 import { MachineStation } from "./MachineStation";
+const stationX = [280, 510, 740, 970];
 
-interface FactoryFloorProps {
-  machineMetrics: Record<string, MachineMetric>;
-  bufferLevels: BufferLevels;
-  finishedGoodsAvailable: number;
-  selectedMachineId: string;
-  onSelectMachine: (machineId: string) => void;
-}
-
-const machines = [
-  { id: "cnc_01", name: "CNC-01" },
-  { id: "wash_01", name: "Wash-01" },
-  { id: "assembly_01", name: "Assembly-01" },
-  { id: "quality_01", name: "Quality-01" },
-] as const;
-
-const buffers = [
-  "after_cnc_01",
-  "after_wash_01",
-  "after_assembly_01",
-  "finished",
-] as const;
-
-function Warehouse({
-  label,
-  value,
-  detail,
-  kind,
-}: {
-  label: string;
-  value: number;
-  detail: string;
-  kind: "raw" | "finished";
-}) {
-  return (
-    <section className={`warehouse warehouse--${kind}`} aria-label={label}>
-      <div className="warehouse__label">{label}</div>
-      <svg viewBox="0 0 152 108" role="img" aria-label={`${label} storage racks`}>
-        <rect className="rack-frame" x="10" y="8" width="132" height="92" />
-        <path className="rack-lines" d="M10 38h132M10 69h132M45 8v92M78 8v92M111 8v92" />
-        {[22, 55, 88, 121].map((x) => (
-          <g key={x} className="rack-load">
-            <rect x={x - 9} y="16" width="18" height="14" />
-            <rect x={x - 9} y="47" width="18" height="14" />
-            <rect x={x - 9} y="78" width="18" height="14" />
-          </g>
-        ))}
-      </svg>
-      <div className="warehouse__count">
-        <strong>{value}</strong>
-        <span>{detail}</span>
-      </div>
-    </section>
-  );
-}
-
-function FlowConnector({ count, running }: { count: number; running: boolean }) {
-  return (
-    <div className={`flow-connector ${running ? "is-moving" : ""}`}>
-      <div className="buffer-counter" title="Work-in-process buffer">
-        <span>WIP</span>
-        <strong>{count}</strong>
-      </div>
-      <svg viewBox="0 0 104 42" aria-hidden="true">
-        <path className="conveyor-rail" d="M2 13h84M2 29h84" />
-        <path className="conveyor-ties" d="M12 13v16M28 13v16M44 13v16M60 13v16M76 13v16" />
-        <path className="flow-arrow" d="M72 4l28 17-28 17z" />
-      </svg>
-    </div>
-  );
-}
-
-export function FactoryFloor({
-  machineMetrics,
-  bufferLevels,
-  finishedGoodsAvailable,
-  selectedMachineId,
-  onSelectMachine,
-}: FactoryFloorProps) {
-  return (
-    <section className="factory-floor panel-frame" aria-labelledby="factory-floor-title">
-      <div className="section-heading">
-        <div>
-          <span className="section-code">AREA A / SINGLE PRODUCT LINE</span>
-          <h2 id="factory-floor-title">Factory floor</h2>
-        </div>
-        <div className="floor-legend" aria-label="Machine state legend">
-          <span className="legend-running">Running</span>
-          <span className="legend-constrained">Starved / blocked</span>
-          <span className="legend-maintenance">Maintenance</span>
-          <span className="legend-down">Down</span>
-        </div>
-      </div>
-
-      <div className="factory-floor__viewport">
-        <div className="factory-floor__plan">
-          <svg className="floor-markings" viewBox="0 0 1680 430" preserveAspectRatio="none" aria-hidden="true">
-            <defs>
-              <pattern id="floor-grid" width="32" height="32" patternUnits="userSpaceOnUse">
-                <path d="M32 0H0V32" />
-              </pattern>
-              <pattern id="hazard-stripe" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                <rect width="5" height="20" />
-              </pattern>
-            </defs>
-            <rect className="floor-grid" width="1680" height="430" fill="url(#floor-grid)" />
-            <rect className="work-cell-boundary" x="205" y="32" width="1265" height="336" />
-            <rect className="safety-walkway" x="0" y="378" width="1680" height="20" fill="url(#hazard-stripe)" />
-            <path className="forklift-route" d="M18 404h1640" />
-          </svg>
-
-          <div className="line-flow-grid">
-            <Warehouse
-              label="Raw Material Warehouse"
-              value={bufferLevels.raw ?? 0}
-              detail="steel blanks on hand"
-              kind="raw"
-            />
-
-            {machines.map((machine, index) => {
-              const metric = machineMetrics[machine.id];
-              if (!metric) return null;
-              const bufferId = buffers[index];
-              return (
-                <div className="line-flow-segment" key={machine.id}>
-                  <FlowConnector
-                    count={index === 0 ? 0 : bufferLevels[buffers[index - 1]] ?? 0}
-                    running={metric.state === "RUNNING"}
-                  />
-                  <MachineStation
-                    machineId={machine.id}
-                    displayName={machine.name}
-                    metric={metric}
-                    selected={selectedMachineId === machine.id}
-                    onSelect={onSelectMachine}
-                  />
-                  {index === machines.length - 1 ? (
-                    <FlowConnector
-                      count={bufferLevels[bufferId] ?? 0}
-                      running={metric.state === "RUNNING"}
-                    />
-                  ) : null}
-                </div>
-              );
-            })}
-
-            <Warehouse
-              label="Finished Goods Warehouse"
-              value={finishedGoodsAvailable}
-              detail={`${bufferLevels.finished ?? 0} total produced`}
-              kind="finished"
-            />
-          </div>
-
-          <div className="floor-note floor-note--inbound">INBOUND / RM-01</div>
-          <div className="floor-note floor-note--outbound">OUTBOUND / FG-01</div>
-        </div>
-      </div>
-    </section>
-  );
+export function FactoryFloor({session, selected, onSelect}: {session: SessionSnapshot; selected: string | null; onSelect: (id: string) => void}) {
+  const profile = session.scenario_profile;
+  const scene = profile.scene;
+  return <section className="floor-panel" aria-label="Live factory floor">
+    <div className="section-heading"><h2>Plant View</h2><div className="legend"><span className="running">Running</span><span className="attention">Attention</span><span className="critical">Down</span><span className="maintenance">Maintenance</span></div></div>
+    <div className="floor-scroll"><svg className="factory-map" viewBox="0 0 1220 510" role="group" aria-label="Top-down factory floor: receiving, raw warehouse, CNC, wash, assembly, quality, finished goods and dispatch">
+      <defs><pattern id="floor-tiles" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#ccc8bd" strokeWidth="0.6" /></pattern><marker id="process-arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0l10 5-10 5z" fill="currentColor" /></marker></defs>
+      <rect className="floor-surface" width="1220" height="510"/><rect width="1220" height="510" fill="url(#floor-tiles)"/>
+      <path className="building-wall" d="M8 30V7h1204v495H8v-12M8 330V65"/>
+      <text className="plan-caption" x="24" y="32">ARTEMIS / COMPONENT LINE A</text><text className="plan-caption" x="929" y="32">TOP VIEW · SCHEMATIC</text>
+      <path className="safety-lane" d="M214 65v278h989M213 367h691M246 65v260h957"/>
+      <text className="lane-label" x="412" y="361">KEEP CLEAR · MATERIAL TRANSFER LANE</text>
+      <rect className="work-zone" x="265" y="62" width="873" height="266"/>
+      <text className="zone-detail" x="280" y="86">MACHINING</text><text className="zone-detail" x="510" y="86">CLEANING</text><text className="zone-detail" x="740" y="86">ASSEMBLY</text><text className="zone-detail" x="970" y="86">INSPECTION</text>
+      <FactoryZones zones={scene.zones} highlight={scene.highlighted_zone}/>
+      <path className="material-route" d="M114 375v-45M1173 321v32H1065v14M926 443h-33" markerEnd="url(#process-arrow)"/>
+      {profile.machines.map((asset, i) => {
+        const x = stationX[i];
+        const route = scene.routes.find(r => r.id === asset.id);
+        const input = scene.zones.find(z => z.id === asset.input_buffer)!;
+        return <g key={asset.id}>
+          <path className="conveyor-frame" d={`M${i === 0 ? 205 : stationX[i - 1] + 148} 208H${x}M${i === 0 ? 205 : stationX[i - 1] + 148} 220H${x}`} />
+          <path className={`conveyor-flow ${route?.active && !session.paused ? "active" : ""}`} d={`M${i === 0 ? 207 : stationX[i - 1] + 150} 214H${x - 5}`} markerEnd="url(#process-arrow)"/>
+          {i > 0 && <g className={`buffer-zone ${input.congested ? "zone-attention" : ""}`}><rect x={x - 68} y="96" width="60" height="88"/><Pallets zone={input} x={x - 63} y={104} columns={2} limit={4}/><text className="buffer-label" x={x - 62} y="174">{input.units}/{input.capacity}</text></g>}
+          <MachineStation asset={asset} metric={session.summary.machine_metrics[asset.id]} x={x} selected={selected === asset.id} onSelect={() => onSelect(asset.id)}/>
+          {profile.active_alerts.some(a => a.zone === asset.id) && <g className="map-alert" transform={`translate(${x + 160},280)`}><circle r="9"/><text y="4" textAnchor="middle">!</text><title>{profile.active_alerts.filter(a => a.zone === asset.id).map(a => a.message).join(" ")}</title></g>}
+        </g>;
+      })}
+      <path className="conveyor-frame" d="M1118 208h55v115M1118 220h43v103"/>
+      <g className="floor-annotation"><text x="280" y="410">SHIFT OUTPUT</text><text x="280" y="436">{session.summary.good_production} good · {session.summary.scrap} scrap</text><text x="280" y="460">{session.summary.finished_goods_allocated} allocated to customers</text></g>
+    </svg></div>
+    <div className="map-footer"><span>{profile.scene.highlighted_zone ? `Attention zone: ${profile.scene.highlighted_zone.replace(/_/g, " ")}` : "No active exceptions"}</span><span>Pallet symbols: up to 20 raw/FG units or 2 WIP units · Select equipment for details</span></div>
+  </section>;
 }

@@ -1,112 +1,20 @@
-import type { CustomerOrder, OrderSummary } from "../types";
-
-interface OrderBoardProps {
-  orderSummary: OrderSummary;
-  simulatedMinutes: number;
-  busy: boolean;
-  onRushOrder: (order: CustomerOrder) => void;
+import { useState } from "react";
+import { clock, label, percent } from "../format";
+import type { CustomerOrder, SessionSnapshot } from "../types";
+function PriorityControl({order, busy, save}: {order: CustomerOrder; busy: boolean; save: (id: string, priority: number) => Promise<boolean>}) {
+  const [draft, setDraft] = useState(String(order.priority));
+  const eligible = (order.status === "ACTIVE" || order.status === "LATE") && order.remaining_quantity > 0;
+  return <form className="priority-control" onSubmit={event => {event.preventDefault(); void save(order.id, Number(draft));}}>
+    <input aria-label={`Priority for ${order.id}`} type="number" min="0" max="100" step="1" required value={draft} onChange={e => setDraft(e.target.value)} disabled={busy || !eligible} />
+    <button type="submit" disabled={busy || !eligible || draft === "" || Number(draft) === order.priority}>Save</button>
+    <button type="button" disabled={busy || !eligible || order.priority >= 100} onClick={() => void save(order.id, Math.min(100, order.priority + 10))}>Rush</button>
+  </form>;
 }
-
-function statusLabel(status: CustomerOrder["status"]): string {
-  return status.replace(/_/g, " ");
-}
-
-function dueLabel(order: CustomerOrder, simulatedMinutes: number): string {
-  if (order.status.startsWith("COMPLETED")) return `M${order.due_minute}`;
-  const delta = order.due_minute - simulatedMinutes;
-  if (delta < 0) return `${Math.abs(Math.round(delta))}m overdue`;
-  return `${Math.round(delta)}m remaining`;
-}
-
-export function OrderBoard({
-  orderSummary,
-  simulatedMinutes,
-  busy,
-  onRushOrder,
-}: OrderBoardProps) {
-  return (
-    <section className="order-board panel-frame" aria-labelledby="order-board-title">
-      <div className="section-heading order-board__heading">
-        <div>
-          <span className="section-code">CUSTOMER COMMITMENTS / EDF DISPATCH</span>
-          <h2 id="order-board-title">Order board</h2>
-        </div>
-        <div className="order-board__totals">
-          <span><b>{orderSummary.orders_completed}</b> completed</span>
-          <span><b>{orderSummary.backlog_orders}</b> open backlog</span>
-          <span><b>{orderSummary.orders_late}</b> late</span>
-        </div>
-      </div>
-
-      <div className="table-scroll">
-        <table className="operations-table">
-          <thead>
-            <tr>
-              <th>Order</th>
-              <th className="numeric">Qty</th>
-              <th className="numeric">Fulfilled</th>
-              <th className="numeric">Remaining</th>
-              <th>Due</th>
-              <th className="numeric">Priority</th>
-              <th>Status</th>
-              <th><span className="visually-hidden">Action</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {orderSummary.orders.map((order) => {
-              const urgent = order.id.includes("URGENT");
-              const eligible =
-                (order.status === "ACTIVE" || order.status === "LATE") &&
-                order.remaining_quantity > 0 &&
-                order.priority < 100;
-              return (
-                <tr
-                  key={order.id}
-                  className={`${urgent ? "is-urgent" : ""} ${order.status === "LATE" ? "is-late" : ""}`}
-                >
-                  <td>
-                    <strong>{order.id}</strong>
-                    {urgent ? <span className="urgent-flag">URGENT</span> : null}
-                  </td>
-                  <td className="numeric">{order.quantity}</td>
-                  <td className="numeric">{order.fulfilled_quantity}</td>
-                  <td className="numeric emphasis">{order.remaining_quantity}</td>
-                  <td>
-                    <strong>M{order.due_minute}</strong>
-                    <small>{dueLabel(order, simulatedMinutes)}</small>
-                  </td>
-                  <td className="numeric priority-cell">P{order.priority}</td>
-                  <td>
-                    <span className={`order-status order-status--${order.status.toLowerCase()}`}>
-                      {statusLabel(order.status)}
-                    </span>
-                  </td>
-                  <td className="action-cell">
-                    <button
-                      type="button"
-                      className="table-action"
-                      onClick={() => onRushOrder(order)}
-                      disabled={!eligible || busy}
-                      title={
-                        order.priority >= 100
-                          ? "Priority is already at the maximum"
-                          : eligible
-                            ? `Raise priority to ${Math.min(100, order.priority + 10)}`
-                            : "Only released, incomplete orders can be rushed"
-                      }
-                    >
-                      Rush +10
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p className="allocation-note">
-        Future allocation: earliest due date → highest priority → order ID. Existing allocations stay assigned.
-      </p>
-    </section>
-  );
+export function OrderBoard({session, busy, save}: {session: SessionSnapshot; busy: boolean; save: (id: string, priority: number) => Promise<boolean>}) {
+  const orders = session.summary.order_summary;
+  return <section className="order-board"><div className="section-heading"><h2>Customer commitments</h2><span>{orders.units_delivered} delivered · {orders.backlog_units} backlog · OTIF {percent(orders.otif)}</span></div>
+    <div className="table-scroll"><table><thead><tr><th>Order / release</th><th>Qty</th><th>Fulfilled</th><th>Remaining</th><th>Due</th><th>Status / risk</th><th>Priority decision</th></tr></thead><tbody>{orders.orders.map(order => <tr key={order.id} className={order.status === "LATE" ? "late-row" : ""}>
+      <td><strong>{order.id}</strong>{order.id.includes("URGENT") && <span className="tag attention">Urgent</span>}<small>Release {clock(order.release_minute)}</small></td><td>{order.quantity}</td><td>{order.fulfilled_quantity}</td><td><strong>{order.remaining_quantity}</strong></td><td>{clock(order.due_minute)}<small>M{order.due_minute}</small></td><td><span className={`state-tag ${order.status === "LATE" || order.status === "COMPLETED_LATE" ? "critical" : ""}`}>{label(order.status)}</span><small>{session.scenario_profile.scene.order_risks[order.id]}</small></td><td><PriorityControl key={`${order.id}-${order.priority}`} order={order} busy={busy} save={save} /></td>
+    </tr>)}</tbody></table></div><p className="table-note">Allocation: earliest due → higher priority → order ID. Raising one priority can delay another with the same deadline. Risk is an optimistic capacity estimate, not a delivery promise.</p>
+  </section>;
 }

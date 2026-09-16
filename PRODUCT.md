@@ -14,7 +14,7 @@ React, TypeScript, and Vite with plain CSS and inline SVG. The simulation remain
 
 ## Users
 
-Plant operators and production-control users supervising a single manufacturing line during an active shift.
+Industrial engineers supervising a single manufacturing line during an active shift, alternating between live factory inspection and office decisions.
 
 ## Product Purpose
 

@@ -10,7 +10,7 @@
 
 </div>
 
-PlantOps models the authoritative operational state of a small manufacturing line. It is intentionally headless and focused: the simulation engine handles production flow, machine state, failures, repairs, scrap, and performance metrics, while the API exposes repeatable simulation runs to other applications.
+PlantOps models the authoritative operational state of a small manufacturing line. The core is authoritative: the simulation engine handles production flow, machine state, failures, repairs, scrap, and performance metrics, while the API exposes repeatable simulation runs to other applications.
 
 The repository now includes the first playable operator console in `plantops-web/`. It is a deliberately dense MES/SCADA-style browser surface: the factory floor is the main view, while orders, purchasing, repairs, and preventive maintenance remain backed by the authoritative in-memory session API.
 
@@ -24,17 +24,53 @@ npm install
 npm run dev:full
 ```
 
-The combined command prefixes output as `API` and `WEB`, and stops the other process when either process exits. The existing `npm run dev` command remains Vite-only. To run the backend separately:
+First create the backend `.venv` and install `.[test]` using the WSL setup below. Node.js 20 or newer is recommended. The combined command prefixes output as `API` and `WEB`, and stops the other process when either process exits. It sets `VITE_API_BASE_URL=http://127.0.0.1:8010` explicitly, reserving the developer's Coolify port for Coolify. Vite binds port 5173 strictly so an occupied port produces a clear startup failure. The existing `npm run dev` command remains Vite-only. To run the backend separately:
 
 ```bash
-cd plantops-core && source .venv/bin/activate && uvicorn plantops_sim.api:app --reload --port 8000
+cd plantops-core && source .venv/bin/activate && uvicorn plantops_sim.api:app --reload --host 127.0.0.1 --port 8010
 ```
 
-Then open the browser console at <http://localhost:5173>. The API's interactive Swagger documentation remains at <http://127.0.0.1:8000/docs>.
+Then open the browser console at <http://localhost:5173>. The API's interactive Swagger documentation remains at <http://127.0.0.1:8010/docs>.
 
 The API allows browser requests from `http://localhost:5173` and `http://127.0.0.1:5173` for local development.
 
-The frontend defaults to `http://127.0.0.1:8000`; copy `plantops-web/.env.example` to `plantops-web/.env` to override `VITE_API_BASE_URL`. On first load it creates the deterministic seed-42 session and pauses it so the operator explicitly starts the shift. Playback advances one simulated minute per second at 1×, two at 2×, and four at 4×, then pauses at the 480-minute shift boundary.
+The frontend defaults to `http://127.0.0.1:8010`; copy `plantops-web/.env.example` to `plantops-web/.env` to override `VITE_API_BASE_URL` for frontend-only development. On first load it creates a seeded shift with seed 42 and pauses it so the engineer explicitly starts the shift. Playback advances one simulated minute per second at 1×, two at 2×, and four at 4×, then pauses at the 480-minute shift boundary. Requests are serialized; uncertain action responses stop playback and reconcile the server snapshot without automatically repeating chargeable decisions.
+
+### Seeded engineering shifts
+
+The browser opts into `POST /sessions` with `"scenario_mode": "seeded"`. Omitting the field keeps the classic MVP scenario, preserving existing clients, CLI runs, `/simulate`, and reference event digests. Every session snapshot additionally contains `scenario_profile` and `action_log`.
+
+Profile version 1 uses the isolated `scenario-profile:v1` random stream to choose one of five believable handovers: Delivery recovery, Material shortage, Quality containment, Maintenance risk, or Competing rush orders. It configures actual raw stock, carried-in WIP, normal order quantities/priorities/deadlines, initial CNC health, and supplier lead/delay terms. The quality profile uses a higher real inspection reject probability. No purchase orders are placed automatically. All orders remain one product family; no fictitious changeovers or multi-product BOM are implied.
+
+For example, replay seed **42** opens a Maintenance risk shift; **43** opens Delivery recovery; **4** opens Material shortage. New Shift advances to the next seed by default. Expand **Advanced / deterministic replay** in the New Shift dialog to enter any specific seed. Repeat the same decisions at the same simulated times to reproduce the shift.
+
+`scenario_profile` contains a versioned ID, title, manager briefing, initial conditions, machine capabilities, supplier terms, live alerts, capacity context, and `scene`. Scene zones contain actual unit counts, capacity, pallet counts and congestion; routes become active only while the associated machine runs. Finished-goods scene stock means **unallocated** goods, while legacy `buffer_levels.finished` remains total good production. Carry-in WIP uses unique IDs ahead of future supplier receipts and is not counted as production until it passes Quality during this shift.
+
+The order board's “At risk” flag is an optimistic due-date/queue/cycle-time estimate, not a forecast. It excludes breakdown, scrap and receipt delays. Material-coverage alerts compare remaining demand against stock, in-process units and committed inbound material before scrap allowance. Current alerts and visual state are read-only projections: inspecting them never changes events, random streams or digests.
+
+### Engineering workspaces
+
+The permanent left rail opens eight useful views in the same session:
+
+| Workspace | Live content and decisions |
+| --- | --- |
+| Plant View | Top-down floor plan, real pallets/WIP/routes, contextual asset dialog and order board |
+| Office / Inbox | Manager handover and tasks derived from current alerts |
+| Production Plan | Demand versus output, ideal capacity, queues and order priority decisions |
+| Orders | Fulfillment, deadlines, risk, OTIF and priority input (0–100) |
+| Maintenance | Health, failure risk, downtime, emergency repairs and preventive plans |
+| Quality | Actual automatic inspection, yield and scrap disposition; read only |
+| Inventory | Storage, inbound material, supplier terms and purchase-order entry |
+| Reports | Interim/shift-end metrics, separate cost ledgers, open risks and actual engine action log |
+
+Priorities affect future allocations only and only break ties between identical due times. Procurement, priority changes and maintenance remain usable while paused. Quality containment submissions and inventory reconciliation are intentionally deferred: no form claims to save an unimplemented decision. There is no persistence beyond the in-memory API process, authentication, multiplayer or background simulation worker.
+
+Build the browser application with:
+
+```bash
+cd plantops-web
+npm run build
+```
 
 ## Production line
 
@@ -97,17 +133,17 @@ The CLI prints the complete simulation summary followed by its deterministic eve
 ### Run the API
 
 ```bash
-python -m uvicorn plantops_sim.api:app --reload
+python -m uvicorn plantops_sim.api:app --reload --host 127.0.0.1 --port 8010
 ```
 
 Keep that terminal running, then open Swagger UI in your browser:
 
-<http://127.0.0.1:8000/docs>
+<http://127.0.0.1:8010/docs>
 
 Additional endpoints:
 
-- ReDoc documentation: <http://127.0.0.1:8000/redoc>
-- Health check: <http://127.0.0.1:8000/health>
+- ReDoc documentation: <http://127.0.0.1:8010/redoc>
+- Health check: <http://127.0.0.1:8010/health>
 
 ## API reference
 
@@ -135,7 +171,7 @@ Runs the MVP production scenario and returns its summary and event digest.
 Example request:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/simulate \
+curl -X POST http://127.0.0.1:8010/simulate \
   -H "Content-Type: application/json" \
   -d '{
     "seed": 42,
@@ -247,7 +283,7 @@ finished_goods_total = good_production
 
 ## Supplier purchasing and raw-material replenishment
 
-The MVP begins with **200 raw steel blanks**. This is intentionally below the 260 units of normal demand plus the seeded urgent order, so the line will eventually starve unless the player purchases more material. PlantOps never creates purchase orders automatically.
+The classic MVP begins with **200 raw steel blanks**. This is intentionally below the 260 units of normal demand plus the seeded urgent order, so the line will eventually starve unless the player purchases more material. PlantOps never creates purchase orders automatically.
 
 The scenario has one supplier:
 
@@ -339,7 +375,7 @@ Sessions and player actions are an in-memory MVP. They are lost when the API pro
 ### Create a session
 
 ```bash
-curl -X POST http://127.0.0.1:8000/sessions \
+curl -X POST http://127.0.0.1:8010/sessions \
   -H "Content-Type: application/json" \
   -d '{
     "seed": 42,
@@ -391,9 +427,9 @@ The summary is abridged above; API responses include the complete simulation met
 Replace `{session_id}` with the UUID returned when the session was created.
 
 ```bash
-curl http://127.0.0.1:8000/sessions/{session_id}
+curl http://127.0.0.1:8010/sessions/{session_id}
 
-curl -X POST http://127.0.0.1:8000/sessions/{session_id}/advance \
+curl -X POST http://127.0.0.1:8010/sessions/{session_id}/advance \
   -H "Content-Type: application/json" \
   -d '{"minutes": 15}'
 ```
@@ -403,10 +439,10 @@ The `minutes` value is an explicit amount of simulated time. The stored speed is
 ### Pause, resume, and change speed
 
 ```bash
-curl -X POST http://127.0.0.1:8000/sessions/{session_id}/pause
-curl -X POST http://127.0.0.1:8000/sessions/{session_id}/resume
+curl -X POST http://127.0.0.1:8010/sessions/{session_id}/pause
+curl -X POST http://127.0.0.1:8010/sessions/{session_id}/resume
 
-curl -X PUT http://127.0.0.1:8000/sessions/{session_id}/speed \
+curl -X PUT http://127.0.0.1:8010/sessions/{session_id}/speed \
   -H "Content-Type: application/json" \
   -d '{"speed": 4}'
 ```
@@ -421,7 +457,7 @@ Use the machine's display identifier, such as `CNC-01`:
 
 ```bash
 curl -X POST \
-  http://127.0.0.1:8000/sessions/{session_id}/actions/expedite-repair \
+  http://127.0.0.1:8010/sessions/{session_id}/actions/expedite-repair \
   -H "Content-Type: application/json" \
   -d '{"machine_id": "CNC-01"}'
 ```
@@ -434,7 +470,7 @@ A player can change the priority of a released, incomplete order to an integer f
 
 ```bash
 curl -X POST \
-  http://127.0.0.1:8000/sessions/{session_id}/actions/prioritize-order \
+  http://127.0.0.1:8010/sessions/{session_id}/actions/prioritize-order \
   -H "Content-Type: application/json" \
   -d '{"order_id": "ORDER-002", "priority": 100}'
 ```
@@ -453,7 +489,7 @@ Purchase between 1 and 1,000 raw units from the MVP supplier. This planning acti
 
 ```bash
 curl -X POST \
-  http://127.0.0.1:8000/sessions/{session_id}/actions/place-purchase-order \
+  http://127.0.0.1:8010/sessions/{session_id}/actions/place-purchase-order \
   -H "Content-Type: application/json" \
   -d '{"supplier_id": "STEEL-01", "quantity": 100}'
 ```
@@ -466,7 +502,7 @@ Start the configured maintenance plan for an eligible machine:
 
 ```bash
 curl -X POST \
-  http://127.0.0.1:8000/sessions/{session_id}/actions/start-preventive-maintenance \
+  http://127.0.0.1:8010/sessions/{session_id}/actions/start-preventive-maintenance \
   -H "Content-Type: application/json" \
   -d '{"machine_id": "CNC-01"}'
 ```

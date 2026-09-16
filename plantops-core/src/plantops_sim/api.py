@@ -47,6 +47,7 @@ class CreateSessionRequest(BaseModel):
     seed: int = Field(default=42, ge=0)
     failures_enabled: bool = True
     speed: Literal[1, 2, 4] = 1
+    scenario_mode: Literal["classic", "seeded"] = "classic"
 
 
 class AdvanceSessionRequest(BaseModel):
@@ -104,6 +105,7 @@ def create_session(request: CreateSessionRequest) -> dict[str, Any]:
         seed=request.seed,
         failures_enabled=request.failures_enabled,
         speed=request.speed,
+        scenario_mode=request.scenario_mode,
     )
 
 

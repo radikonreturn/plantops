@@ -43,8 +43,16 @@ class StageConfig:
     wear_based_failure_multiplier: float = 0.0
     preventive_maintenance_duration: float = 0.0
     preventive_maintenance_cost: float = 0.0
+    initial_health: float = 100.0
 
     def __post_init__(self) -> None:
+        if (
+            isinstance(self.initial_health, bool)
+            or not isinstance(self.initial_health, (int, float))
+            or not isfinite(self.initial_health)
+            or not 0 <= self.initial_health <= 100
+        ):
+            raise ValueError("Initial machine health must be between 0 and 100")
         maintenance_fields = (
             ("health loss per processed unit", self.health_loss_per_processed_unit),
             ("wear-based failure multiplier", self.wear_based_failure_multiplier),
@@ -172,6 +180,23 @@ class Scenario:
     orders: tuple[OrderConfig, ...] = ()
     urgent_order_rule: UrgentOrderRule | None = None
     suppliers: tuple[SupplierConfig, ...] = ()
+    initial_wip: tuple[tuple[str, int], ...] = ()
+
+    def __post_init__(self) -> None:
+        seen: set[str] = set()
+        for buffer_id, quantity in self.initial_wip:
+            if (
+                buffer_id in seen
+                or buffer_id not in self.buffer_capacities
+                or buffer_id in {"raw", "finished"}
+            ):
+                raise ValueError("Initial WIP must name unique inter-stage buffers")
+            capacity = self.buffer_capacities[buffer_id]
+            if type(quantity) is not int or quantity < 0 or (
+                capacity is not None and quantity > capacity
+            ):
+                raise ValueError("Initial WIP must be a non-negative integer within capacity")
+            seen.add(buffer_id)
 
 
 @dataclass
