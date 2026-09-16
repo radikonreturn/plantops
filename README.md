@@ -36,15 +36,30 @@ The API allows browser requests from `http://localhost:5173` and `http://127.0.0
 
 The frontend defaults to `http://127.0.0.1:8010`; copy `plantops-web/.env.example` to `plantops-web/.env` to override `VITE_API_BASE_URL` for frontend-only development. On first load it creates a seeded shift with seed 42 and pauses it so the engineer explicitly starts the shift. Playback advances one simulated minute per second at 1×, two at 2×, and four at 4×, then pauses at the 480-minute shift boundary. Requests are serialized; uncertain action responses stop playback and reconcile the server snapshot without automatically repeating chargeable decisions.
 
+Vite polls source changes because mounted Windows workspaces can miss native file events and otherwise serve stale modules. The strict frontend port remains 5173; API port 8000 is reserved for Coolify.
+
 ### Seeded engineering shifts
 
 The browser opts into `POST /sessions` with `"scenario_mode": "seeded"`. Omitting the field keeps the classic MVP scenario, preserving existing clients, CLI runs, `/simulate`, and reference event digests. Every session snapshot additionally contains `scenario_profile` and `action_log`.
 
-Profile version 1 uses the isolated `scenario-profile:v1` random stream to choose one of five believable handovers: Delivery recovery, Material shortage, Quality containment, Maintenance risk, or Competing rush orders. It configures actual raw stock, carried-in WIP, normal order quantities/priorities/deadlines, initial CNC health, and supplier lead/delay terms. The quality profile uses a higher real inspection reject probability. No purchase orders are placed automatically. All orders remain one product family; no fictitious changeovers or multi-product BOM are implied.
+Profile version 2 uses isolated `scenario-profile:v2` and `scenario-conditions:v2` random streams. Eight handovers configure actual station health, cycle capacity, carried-in WIP, raw stock, order pressure, supplier terms, or final-inspection rejection risk: CNC wear, laser material jam, wash filter restriction, assembly fixture constraint, test calibration pressure, quality containment, material shortage, and competing rush orders. No purchase orders are placed automatically. All orders remain one product family; no fictitious changeovers or multi-product BOM are implied.
 
-For example, replay seed **42** opens a Maintenance risk shift; **43** opens Delivery recovery; **4** opens Material shortage. New Shift advances to the next seed by default. Expand **Advanced / deterministic replay** in the New Shift dialog to enter any specific seed. Repeat the same decisions at the same simulated times to reproduce the shift.
+For example, replay seed **42** opens CNC wear risk (18 cut blanks before CNC); **0** opens Laser material jam (heavy raw stock); **1** opens Wash filter restriction (18 machined units before wash). Seeds **11**, **7**, **9**, **2**, and **8** demonstrate assembly, test, quality, material, and dispatch concerns respectively. Seeded v2 intentionally changes v1 seed mappings; classic reference digests remain unchanged. New Shift advances to the next seed by default. Expand **Advanced / deterministic replay** in the New Shift dialog to enter any specific seed. A successful New Shift automatically opens **Office / Inbox** and updates the URL hash. Repeat the same decisions at the same simulated times to reproduce the shift.
 
-`scenario_profile` contains a versioned ID, title, manager briefing, initial conditions, machine capabilities, supplier terms, live alerts, capacity context, and `scene`. Scene zones contain actual unit counts, capacity, pallet counts and congestion; routes become active only while the associated machine runs. Finished-goods scene stock means **unallocated** goods, while legacy `buffer_levels.finished` remains total good production. Carry-in WIP uses unique IDs ahead of future supplier receipts and is not counted as production until it passes Quality during this shift.
+The seeded automotive bracket route is **receiving → laser/cutting → CNC → wash → assembly → functional test/CMM → final quality → finished goods/dispatch**. Classic retains its four stages. Five finite inter-stage buffers carry uniquely identified units. Building geometry is stable across seeds; pallet counts, congestion, machine highlights, conveyor state and dispatch/receiving pressure change with authoritative state.
+
+| Asset | Preventive action | Duration | Cost |
+| --- | --- | --- | --- |
+| Laser / Cutting | Lens and nozzle service | 12 min | 140 |
+| CNC Machining | Spindle and tool service | 20 min | 250 |
+| Wash Cell | Filter and bath service | 15 min | 120 |
+| Assembly Cell | Fixture service | 10 min | 100 |
+| Test / CMM | Calibration service | 18 min | 180 |
+| Final Quality | None; automatic lot inspection | — | — |
+
+PM uses the existing engine: only idle, starved or blocked equipment may start; completion restores health and reduces wear-related failure risk. It does not change cycle capacity or lot rejection risk. Equipment faults are modeled as per-unit interruption risks with machine-specific repair durations, not detailed mechanical physics. The failures-disabled option zeroes failure probability for every seeded machine. The quality containment profile sets actual final-inspection rejection probability to 14%; observed scrap remains a separate outcome.
+
+`scenario_profile` contains a versioned ID, title, manager briefing, initial conditions, primary problem zone, machine role/fault mode/status, effective failure risk, PM availability/duration/cost, input/output buffer IDs, supplier terms, live alerts, capacity context, and `scene`. Scene zones contain actual unit counts, capacity, pallet counts and congestion; routes become active only while the associated machine runs, and expose waiting quantity and output-buffer blocking. Capacity identifies the configured bottleneck assets. Receiving exposes inbound units and uncovered demand; dispatch exposes allocation and at-risk order counts. Finished-goods scene stock means **unallocated** goods, while legacy `buffer_levels.finished` remains total good production. Carry-in WIP uses unique IDs ahead of future supplier receipts and is not counted as production until it passes Quality during this shift.
 
 The order board's “At risk” flag is an optimistic due-date/queue/cycle-time estimate, not a forecast. It excludes breakdown, scrap and receipt delays. Material-coverage alerts compare remaining demand against stock, in-process units and committed inbound material before scrap allowance. Current alerts and visual state are read-only projections: inspecting them never changes events, random streams or digests.
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import RLock
 from typing import Any
 from uuid import uuid4
@@ -65,6 +65,10 @@ class SessionManager:
         profile = CLASSIC_PROFILE
         if scenario_mode == "seeded":
             scenario, profile = make_seeded_shift(scenario, seed)
+            if not failures_enabled:
+                scenario = replace(scenario, stages=tuple(
+                    replace(stage, failure_probability=0) for stage in scenario.stages
+                ))
         session = SimulationSession(
             session_id=str(uuid4()),
             simulation=ProductionLineSimulation(scenario, seed=seed),

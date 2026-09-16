@@ -263,3 +263,16 @@ td strong { font-weight: 600; }
   .maintenance-row .readings { grid-template-columns: repeat(2, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { .conveyor-flow.active { animation: none; } }
+
+/* The physical bays stay fixed; route load and equipment condition are live. */
+.factory-map { min-width: 1080px; }
+.machine-node.highlighted .machine-hit { fill: #e6d8b7; fill-opacity: .65; stroke: #927132; stroke-width: 2; }
+.conveyor-track { fill: none; stroke: #b6beb0; stroke-width: 10; }
+.conveyor-flow.loaded { stroke-width: 3; }
+.conveyor-flow.blocked { stroke: #a06031; stroke-dasharray: 3 4; animation: none; }
+.conveyor-flow.paused { animation-play-state: paused; }
+.factory-map .queue-caption { font-size: 8px; font-weight: 600; }
+.factory-map .capacity-limit { fill: #795318; font-weight: 700; }
+.material-token rect { fill: #bfaa70; stroke: #796835; }
+.material-token path { fill: none; stroke: #796835; stroke-width: 3; }
+.map-concern { border-top: 1px solid var(--line); padding: 9px 14px; font-size: 12px; color: #654717; background: #eee5d1; }

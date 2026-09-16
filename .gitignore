@@ -95,3 +95,4 @@ logs/
 plantops-web/node_modules/
 plantops-web/dist/
 plantops-core/.venv/
+.impeccable/review/

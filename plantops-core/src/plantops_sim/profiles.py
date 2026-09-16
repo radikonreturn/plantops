@@ -1,6 +1,6 @@
 """Seeded shift configuration and read-only projections for the operator console.
 
-Profile v1 uses its own named RNG stream. Snapshot generation never draws randomness
+Seeded profile v2 uses its own named RNG streams. Snapshot generation never draws randomness
 or changes the event log. Classic API clients retain their original scenario.
 """
 from __future__ import annotations
@@ -11,6 +11,7 @@ from typing import Any
 
 from .engine import ProductionLineSimulation, RandomStreams
 from .model import OrderConfig, Scenario
+from .scenario import MACHINE_METADATA, make_seeded_line
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class ShiftProfile:
     id: str
     title: str
     briefing: str
+    primary_zone: str | None = None
 
 
 CLASSIC_PROFILE = ShiftProfile(
@@ -26,62 +28,82 @@ CLASSIC_PROFILE = ShiftProfile(
     "coverage before releasing purchasing decisions and watch CNC health.",
 )
 
+@dataclass(frozen=True)
+class ProfileDefinition:
+    key: str
+    title: str
+    zone: str
+    stock: int
+    queue_buffer: str | None
+    briefing: str
+    cycle_minutes: float | None = None
+
+
 PROFILE_DEFINITIONS = (
-    ("delivery-recovery", "Delivery recovery", 180, 86, 3,
-     "Recover the first dispatch commitment. Carry-in WIP is occupying the line; "
-     "check downstream queues before committing to maintenance."),
-    ("material-shortage", "Material shortage", 55, 94, 0,
-     "Receiving has limited steel blanks and the supplier has a long lead time. "
-     "Place a purchase order early enough to avoid a starved CNC."),
-    ("quality-containment", "Quality containment", 240, 92, 2,
-     "Quality has flagged an elevated reject risk in this production lot. "
-     "Monitor actual scrap and allow material coverage for replacement units. "
-     "Inspection remains automatic; there is no manual release override."),
-    ("maintenance-risk", "Maintenance risk", 210, 38, 1,
-     "The CNC arrives from the previous shift with significant wear. Decide "
-     "whether a planned stop now is worth the reduction in failure risk."),
-    ("rush-dispatch", "Competing rush orders", 150, 74, 2,
-     "Two customer commitments share the first dispatch window. Set their "
-     "relative priority carefully: rushing one may delay the other. "
-     "All orders still use the same product family."),
+    ProfileDefinition("cnc-wear", "CNC wear risk", "cnc_01", 210, "after_laser_01",
+        "The bracket line inherits spindle and tool wear at CNC. Cut blanks are waiting. "
+        "Choose a planned spindle service before startup or accept higher breakdown risk to protect dispatch."),
+    ProfileDefinition("laser-jam", "Laser material jam", "laser_01", 310, None,
+        "Receiving has delivered a large sheet-blank lot, but the cutting nozzle is in poor condition. "
+        "A material jam can starve every downstream station. Consider lens and nozzle service before cutting."),
+    ProfileDefinition("wash-filter", "Wash filter restriction", "wash_01", 210, "after_cnc_01",
+        "Machined brackets are queued before a restricted wash cell. Filter and bath condition raise stop risk. "
+        "Service restores condition; the slower configured wash cycle remains this shift's capacity limit.", 1.55),
+    ProfileDefinition("assembly-fixture", "Assembly fixture constraint", "assembly_01", 200, "after_wash_01",
+        "The previous shift left clean brackets at assembly. A worn fixture raises jam risk and a single "
+        "fixture limits capacity. Fixture service reduces stop risk but does not add station capacity.", 1.65),
+    ProfileDefinition("test-calibration", "Test calibration pressure", "test_01", 220, "after_assembly_01",
+        "Assembled brackets await functional test and CMM checks. Calibration condition raises interruption "
+        "risk before final inspection. Calibration service restores health; the longer test cycle still limits release.", 1.50),
+    ProfileDefinition("quality-containment", "Quality containment", "quality_01", 240, "after_test_01",
+        "Final inspection is receiving a suspect bracket lot with elevated rejection probability. "
+        "Allow replacement material and review delivery commitments. Inspection is automatic; "
+        "there is no manual release override or maintenance action that changes this lot's reject risk."),
+    ProfileDefinition("material-shortage", "Material shortage", "raw", 45, None,
+        "Receiving has few steel blanks and the supplier has a long, less reliable lead time. "
+        "Place a purchase order early to prevent starvation at cutting and across the bracket line."),
+    ProfileDefinition("rush-dispatch", "Competing rush orders", "dispatch", 155, "after_assembly_01",
+        "Two bracket orders share the first dispatch window. Carry-in WIP is near test and final release. "
+        "Set relative order priority and fund replacement stock: dispatching one customer first can delay the other."),
 )
 
 
 def make_seeded_shift(base: Scenario, seed: int) -> tuple[Scenario, ShiftProfile]:
-    rng = RandomStreams(seed).get("scenario-profile:v1")
-    index = rng.randrange(len(PROFILE_DEFINITIONS))
-    key, title, stock, health, queue, briefing = PROFILE_DEFINITIONS[index]
-    raw_units = stock + rng.randint(0, 24)
-    stages = list(base.stages)
-    stages[0] = replace(stages[0], initial_health=health + rng.randint(0, 5))
-    if index == 2:
-        stages[-1] = replace(stages[-1], scrap_probability=0.11)
-    first_due = (100, 150, 160, 170, 135)[index] + rng.randint(0, 10)
-    orders = tuple(
-        OrderConfig(
-            id=f"ORDER-{i + 1:03d}",
-            quantity=(65, 80, 90)[i] + rng.randint(0, 15),
-            release_minute=0,
-            due_minute=first_due if i == 0 or (index == 4 and i == 1)
-            else (310 if i == 1 else 455) + rng.randint(0, 10),
-            priority=rng.randint(10, 40),
-        )
-        for i in range(3)
+    streams = RandomStreams(seed)
+    definition = streams.get("scenario-profile:v2").choice(PROFILE_DEFINITIONS)
+    rng = streams.get("scenario-conditions:v2")
+    line = make_seeded_line(base)
+    stages = []
+    for stage in line.stages:
+        stage = replace(stage, initial_health=92 + rng.randint(0, 8))
+        if stage.id == definition.zone and stage.id != "quality_01":
+            stage = replace(stage, initial_health=32 + rng.randint(0, 12),
+                            wear_based_failure_multiplier=5)
+        if stage.id == definition.zone and definition.cycle_minutes:
+            stage = replace(stage, ideal_cycle_minutes=definition.cycle_minutes)
+        if stage.id == "quality_01" and definition.zone == "quality_01":
+            stage = replace(stage, scrap_probability=0.14)
+        stages.append(stage)
+    rush = definition.zone == "dispatch"
+    shortage = definition.zone == "raw"
+    first_due = (105 if rush else 150) + rng.randint(0, 15)
+    orders = tuple(OrderConfig(
+        id=f"ORDER-{i + 1:03d}", quantity=(65, 80, 90)[i] + rng.randint(0, 15),
+        release_minute=0, due_minute=first_due if i == 0 or (rush and i == 1)
+        else (310 if i == 1 else 455) + rng.randint(0, 10), priority=rng.randint(10, 40),
+    ) for i in range(3))
+    supplier = replace(base.suppliers[0],
+        min_lead_minutes=95 if shortage else 60 + rng.randint(0, 10),
+        max_lead_minutes=125 if shortage else 90 + rng.randint(0, 10),
+        late_probability=0.35 if shortage else 0.2,
     )
-    supplier = replace(
-        base.suppliers[0],
-        min_lead_minutes=95 if index == 1 else 60,
-        max_lead_minutes=125 if index == 1 else 90,
-        late_probability=0.35 if index == 1 else 0.2,
-    )
-    wip = tuple(
-        (name, min(base.buffer_capacities[name] or 0, queue * 4 + rng.randint(0, 2)))
-        for name in ("after_cnc_01", "after_wash_01", "after_assembly_01")
-    ) if queue else ()
-    return replace(
-        base, raw_material_units=raw_units, stages=tuple(stages), orders=orders,
-        suppliers=(supplier,), initial_wip=wip,
-    ), ShiftProfile(f"{key}-v1", title, briefing)
+    wip = tuple((name, (capacity - rng.randint(0, 2)
+                       if name == definition.queue_buffer else rng.randint(0, 3)))
+                for name, capacity in line.buffer_capacities.items()
+                if capacity is not None)
+    return replace(line, raw_material_units=definition.stock + rng.randint(0, 24),
+                   stages=tuple(stages), orders=orders, suppliers=(supplier,), initial_wip=wip), ShiftProfile(
+        f"{definition.key}-v2", definition.title, definition.briefing, definition.zone)
 
 
 def profile_snapshot(
@@ -100,20 +122,40 @@ def profile_snapshot(
     machines = []
     for stage in scenario.stages:
         machine = simulation.machines[stage.id]
+        role, fault_mode, maintenance_label = MACHINE_METADATA[stage.id]
+        reason = None
         if machine.state == "DOWN":
+            reason = f"{fault_mode}: stopped for repair."
             alert(f"down-{stage.id}", stage.id, "critical",
-                  f"{stage.id.replace('_', '-').upper()} is DOWN. Review emergency repair.", "Maintenance")
+                  f"{stage.name} is DOWN ({fault_mode.lower()}). Review emergency repair.", "Maintenance")
         elif machine.health < 65 and stage.failure_probability > 0:
+            reason = f"{fault_mode}: health {machine.health:.1f}/100."
             alert(f"wear-{stage.id}", stage.id, "attention",
-                  f"CNC health is {machine.health:.1f}/100; wear increases breakdown risk.", "Maintenance")
+                  f"{stage.name}: {fault_mode.lower()}; health {machine.health:.1f}/100, "
+                  f"failure risk {simulation.effective_failure_probability(stage.id):.1%} per unit.", "Maintenance")
+        elif machine.state == "PLANNED_MAINTENANCE":
+            reason = f"{maintenance_label} in progress."
+        elif machine.state == "BLOCKED":
+            reason = f"Output buffer {machine.output_buffer} is full."
+        elif machine.state == "STARVED":
+            reason = f"Waiting for material in {machine.input_buffer}."
+        if stage.scrap_probability > 0.05:
+            reason = f"Configured lot rejection {stage.scrap_probability:.0%}; {machine.scrap_units} observed scrap."
         machines.append({
-            "id": stage.id, "name": stage.id.replace("_", "-").upper(),
+            "id": stage.id, "name": stage.name if profile.primary_zone else stage.id.replace("_", "-").upper(),
+            "stage_role": role, "fault_mode": fault_mode,
             "ideal_cycle_minutes": stage.ideal_cycle_minutes,
             "failure_risk": simulation.effective_failure_probability(stage.id),
+            "maintenance_available": stage.preventive_maintenance_duration > 0,
+            "maintenance_label": maintenance_label,
+            "maintenance_unavailable_reason": None if stage.preventive_maintenance_duration > 0
+            else ("Final inspection rejects the configured lot; equipment service cannot change lot quality."
+                  if role == "quality" else "No preventive maintenance is configured for this stage."),
             "maintenance_duration": stage.preventive_maintenance_duration,
             "maintenance_cost": stage.preventive_maintenance_cost,
             "scrap_probability": stage.scrap_probability,
             "input_buffer": machine.input_buffer, "output_buffer": machine.output_buffer,
+            "status": machine.state, "attention_reason": reason,
         })
 
     in_process = sum(m.busy_unit is not None for m in simulation.machines.values())
@@ -167,11 +209,16 @@ def profile_snapshot(
     if supply["purchase_orders_open"]:
         alert("inbound", "receiving", "info",
               f"{supply['inbound_units']} units inbound on {supply['purchase_orders_open']} open POs.", "Inventory")
-    alerts.sort(key=lambda a: ({"critical": 0, "attention": 1, "info": 2}[a["severity"]], a["id"]))
+    # Put the handover concern first when it is still true, after severity ordering.
+    alerts.sort(key=lambda a: ({"critical": 0, "attention": 1, "info": 2}[a["severity"]],
+                               a["zone"] != profile.primary_zone, a["id"]))
     routes = [
         {"id": stage.id, "from": simulation.machines[stage.id].input_buffer,
          "to": simulation.machines[stage.id].output_buffer,
-         "active": simulation.machines[stage.id].state == "RUNNING"}
+         "active": simulation.machines[stage.id].state == "RUNNING",
+         "blocked": not simulation.buffers[simulation.machines[stage.id].output_buffer].can_take(),
+         "waiting_units": simulation.buffers[simulation.machines[stage.id].input_buffer].size,
+         "status": simulation.machines[stage.id].state}
         for stage in scenario.stages
     ]
     return {
@@ -183,8 +230,17 @@ def profile_snapshot(
         },
         "scene": {"zones": zones, "routes": routes,
                   "highlighted_zone": alerts[0]["zone"] if alerts else None,
+                  "machine_concerns": {m["id"]: m["attention_reason"] for m in machines
+                                       if m["attention_reason"]},
+                  "receiving": {"inbound_units": supply["inbound_units"],
+                                "open_purchase_orders": supply["purchase_orders_open"],
+                                "uncovered_demand": max(0, remaining_demand - coverage)},
+                  "dispatch": {"allocated_units": summary["finished_goods_allocated"],
+                               "at_risk_orders": sum(r in {"Late", "At risk"} for r in risks.values())},
                   "order_risks": risks},
         "capacity": {"bottleneck_cycle_minutes": bottleneck_cycle,
+                     "bottleneck_machines": [s.id for s in scenario.stages
+                                             if s.ideal_cycle_minutes == bottleneck_cycle],
                      "ideal_shift_units": int(scenario.shift_minutes / bottleneck_cycle),
                      "estimate_note": "Ideal capacity only; excludes failures, scrap, starvation and carried-in WIP."},
     }

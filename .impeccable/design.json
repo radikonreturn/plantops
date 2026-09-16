@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-16T09:45:14.202576+00:00",
+  "title": "Design System: PlantOps",
+  "extensions": {
+    "shadows": [],
+    "motion": [
+      {
+        "name": "material-flow",
+        "value": "1.3s linear infinite",
+        "purpose": "Active conveyor dash movement; paused with the session, absent on blocked routes or under reduced-motion preferences."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "wide",
+        "value": "1600px"
+      },
+      {
+        "name": "compact-desktop",
+        "value": "1250px"
+      },
+      {
+        "name": "tablet",
+        "value": "850px"
+      },
+      {
+        "name": "phone",
+        "value": "600px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Compact operational action.",
+      "html": "<button class=\"ds-primary\">New Shift</button>",
+      "css": ".ds-primary{font-family:\"Segoe UI\",\"Helvetica Neue\",Arial,sans-serif;min-height:32px;padding:6px 11px;border:1px solid #aab3ad;border-radius:2px;background:#f5f5ee;color:var(--ink,#283638);cursor:pointer;font-size:12px;font-weight:600;background:var(--blue,#466b7b);border-color:var(--blue,#466b7b);color:#fff;}.ds-primary:hover:not(:disabled){background:#355869;}.ds-primary:focus-visible{outline:2px solid #467487;outline-offset:3px;}.ds-primary:disabled{opacity:.48;cursor:not-allowed;}"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Compact operational action.",
+      "html": "<button class=\"ds-secondary\">Read handover</button>",
+      "css": ".ds-secondary{font-family:\"Segoe UI\",\"Helvetica Neue\",Arial,sans-serif;min-height:32px;padding:6px 11px;border:1px solid #aab3ad;border-radius:2px;background:#f5f5ee;color:var(--ink,#283638);cursor:pointer;font-size:12px;font-weight:600;}.ds-secondary:hover:not(:disabled){background:#dfe8e7;border-color:var(--blue,#466b7b);}.ds-secondary:focus-visible{outline:2px solid #467487;outline-offset:3px;}.ds-secondary:disabled{opacity:.48;cursor:not-allowed;}"
+    },
+    {
+      "name": "Numeric field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Explicit numeric entry with tabular figures.",
+      "html": "<label class=\"ds-field\">Quantity<input type=\"number\" value=\"200\" /></label>",
+      "css": ".ds-field{font-family:\"Segoe UI\",\"Helvetica Neue\",Arial,sans-serif;display:grid;gap:7px;font-size:12px;margin:16px 0;color:var(--ink,#283638);}.ds-field input{font:inherit;min-height:32px;width:100%;padding:5px 8px;border:1px solid #9fa9a4;border-radius:2px;background:#fff;color:var(--ink,#283638);font-variant-numeric:tabular-nums;caret-color:var(--blue,#466b7b);}.ds-field input:focus-visible{outline:2px solid #467487;outline-offset:3px;}.ds-field input:disabled{background:#e6e8e1;color:#68716d;}"
+    },
+    {
+      "name": "Workspace navigation",
+      "kind": "nav",
+      "description": "Current-page row in the charcoal rail.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Engineering workspace\"><button aria-current=\"page\"><svg viewBox=\"0 0 20 20\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"14\" height=\"14\" rx=\"1\"/><path d=\"M3 10h14M10 3v14\"/></svg>Plant View</button></nav>",
+      "css": ".ds-nav{background:var(--graphite,#232e31);padding:12px;}.ds-nav button{font-family:\"Segoe UI\",\"Helvetica Neue\",Arial,sans-serif;min-height:32px;padding:6px 11px;border:1px solid #aab3ad;border-radius:2px;background:#f5f5ee;color:var(--ink,#283638);cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;gap:10px;width:100%;min-height:38px;padding:9px;margin:2px 0;border:1px solid transparent;background:transparent;color:#d4ddd7;text-align:left;font-weight:400;}.ds-nav button[aria-current=\"page\"]{background:#40545a;color:#fff;border-color:#63797b;}.ds-nav button:hover{background:#344246;}.ds-nav button:focus-visible{outline:2px solid #467487;outline-offset:3px;}.ds-nav svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.1;}"
+    },
+    {
+      "name": "State label",
+      "kind": "chip",
+      "description": "Text state used in tables; no pill background.",
+      "html": "<span class=\"ds-state\">Running</span>",
+      "css": ".ds-state{font-family:\"Segoe UI\",\"Helvetica Neue\",Arial,sans-serif;font-size:11px;text-transform:capitalize;color:var(--green,#376b58);}"
+    },
+    {
+      "name": "Office panel",
+      "kind": "card",
+      "refersTo": "office-panel",
+      "description": "Square, ruled workspace container.",
+      "html": "<section class=\"ds-office\"><div class=\"ds-heading\"><h1>Maintenance</h1></div><p>Equipment condition and maintenance actions.</p></section>",
+      "css": ".ds-office{font-family:\"Segoe UI\",\"Helvetica Neue\",Arial,sans-serif;background:var(--paper,#f6f5ef);border:1px solid var(--line,#bfc4ba);padding:24px;color:var(--ink,#283638);}.ds-heading{display:flex;align-items:baseline;justify-content:space-between;gap:15px;border-bottom:1px solid var(--line,#bfc4ba);padding-bottom:15px;margin-bottom:22px;}.ds-heading h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.02em;}.ds-office p{font-size:13px;line-height:1.6;max-width:85ch;margin-top:0;}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Production dispatch board",
+    "overview": "PlantOps inherits a serious MES/SCADA control-room interface. Dense readings, ruled tables, compact controls, and a top-down factory plan establish hierarchy through spacing, tone, and explicit labels. The existing implementation is the visual authority.",
+    "keyCharacteristics": [
+      "Charcoal navigation and warm, pale work surfaces.",
+      "Operational color paired with readable state labels.",
+      "Physical equipment geometry and restrained motion."
+    ],
+    "rules": [],
+    "dos": [
+      "**Do** preserve compact operational hierarchy and tabular readings.",
+      "**Do** pair state colors with labels and show authoritative backend conditions.",
+      "**Do** retain keyboard inspection and internal scrolling for the physical plan."
+    ],
+    "donts": [
+      "**Don't** add gradients, glass, neon, emoji icons, or decorative SaaS cards.",
+      "**Don't** replace the physical equipment plan with generic metric tiles.",
+      "**Don't** use color or motion as the only way to communicate a state."
+    ]
+  }
+}

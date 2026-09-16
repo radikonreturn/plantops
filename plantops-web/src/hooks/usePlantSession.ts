@@ -40,6 +40,7 @@ export function usePlantSession() {
       // Retain the ID if the initial pause response is lost.
       publish(created); publish(await api.pauseSession(created.session_id));
       hold.current = false; setConnectionHold(false);
+      window.location.hash = encodeURIComponent("Office / Inbox");
       setNotice("Shift ready. Review the handover in Office / Inbox, then start when ready.");
       return true;
     } catch (reason) { fail(reason); return false; }

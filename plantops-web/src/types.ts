@@ -146,6 +146,9 @@ export interface SceneZone {
 }
 export interface AssetConfig {
   id: string; name: string; ideal_cycle_minutes: number; failure_risk: number;
+  stage_role: "laser" | "cnc" | "wash" | "assembly" | "test" | "quality";
+  fault_mode: string; status: MachineState; attention_reason: string | null;
+  maintenance_available: boolean; maintenance_label: string; maintenance_unavailable_reason: string | null;
   maintenance_duration: number; maintenance_cost: number; scrap_probability: number;
   input_buffer: string; output_buffer: string;
 }
@@ -154,12 +157,15 @@ export interface Supplier {
   late_probability: number; max_delay_minutes: number; unit_cost: number;
 }
 export interface ScenarioProfile {
-  id: string; title: string; briefing: string; active_alerts: OperationalAlert[];
+  id: string; title: string; briefing: string; primary_zone: string | null; active_alerts: OperationalAlert[];
   machines: AssetConfig[]; suppliers: Supplier[];
   initial_conditions: {raw_units: number; wip: Record<string, number>; machine_health: Record<string, number>};
   scene: {zones: SceneZone[]; highlighted_zone: string | null;
-    routes: {id: string; from: string; to: string; active: boolean}[];
+    routes: {id: string; from: string; to: string; active: boolean; blocked: boolean; waiting_units: number; status: MachineState}[];
+    machine_concerns: Record<string, string>;
+    receiving: {inbound_units: number; open_purchase_orders: number; uncovered_demand: number};
+    dispatch: {allocated_units: number; at_risk_orders: number};
     order_risks: Record<string, string>};
-  capacity: {bottleneck_cycle_minutes: number; ideal_shift_units: number; estimate_note: string};
+  capacity: {bottleneck_cycle_minutes: number; bottleneck_machines: string[]; ideal_shift_units: number; estimate_note: string};
 }
 export interface ActionRecord {id: number; minute: number; kind: string; machine_id: string | null; detail: string}

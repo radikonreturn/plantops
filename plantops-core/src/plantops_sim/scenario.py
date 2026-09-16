@@ -90,3 +90,45 @@ def make_mvp_scenario(
         urgent_order_rule=urgent_order_rule,
         suppliers=suppliers,
     )
+
+
+def make_seeded_line(base: Scenario) -> Scenario:
+    """Expanded bracket line. Classic configuration and RNG consumption stay intact."""
+    from dataclasses import replace
+
+    stages = (
+        StageConfig("laser_01", "Laser / Cutting", 0.95, 0.10,
+                    failure_probability=0.012, repair_min_minutes=5, repair_max_minutes=12,
+                    health_loss_per_processed_unit=0.16, wear_based_failure_multiplier=4,
+                    preventive_maintenance_duration=12, preventive_maintenance_cost=140),
+        replace(base.stages[0], name="CNC Machining", failure_probability=0.018),
+        StageConfig("wash_01", "Wash Cell", 0.72, 0.08,
+                    failure_probability=0.01, repair_min_minutes=6, repair_max_minutes=14,
+                    health_loss_per_processed_unit=0.12, wear_based_failure_multiplier=4,
+                    preventive_maintenance_duration=15, preventive_maintenance_cost=120),
+        StageConfig("assembly_01", "Assembly Cell", 1.08, 0.12,
+                    failure_probability=0.008, repair_min_minutes=4, repair_max_minutes=11,
+                    health_loss_per_processed_unit=0.10, wear_based_failure_multiplier=4,
+                    preventive_maintenance_duration=10, preventive_maintenance_cost=100),
+        StageConfig("test_01", "Test / CMM", 1.05, 0.06,
+                    failure_probability=0.009, repair_min_minutes=8, repair_max_minutes=16,
+                    health_loss_per_processed_unit=0.10, wear_based_failure_multiplier=4,
+                    preventive_maintenance_duration=18, preventive_maintenance_cost=180),
+        replace(base.stages[-1], name="Final Quality"),
+    )
+    return replace(base, stages=stages, buffer_capacities={
+        "raw": None, "after_laser_01": 20, "after_cnc_01": 18,
+        "after_wash_01": 14, "after_assembly_01": 16, "after_test_01": 12,
+        "finished": None,
+    })
+
+
+# Display semantics are keyed by asset identity, never by route position.
+MACHINE_METADATA = {
+    "laser_01": ("laser", "Material jam / lens and nozzle condition", "Clean lens and service nozzle"),
+    "cnc_01": ("cnc", "Spindle and tool wear", "Spindle and tool service"),
+    "wash_01": ("wash", "Filter blockage / bath condition", "Filter and bath service"),
+    "assembly_01": ("assembly", "Fixture jam / station capacity", "Fixture service"),
+    "test_01": ("test", "Calibration interruption / test queue", "Calibration service"),
+    "quality_01": ("quality", "Lot rejection / scrap", ""),
+}
