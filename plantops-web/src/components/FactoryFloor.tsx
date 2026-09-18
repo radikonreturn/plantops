@@ -42,11 +42,11 @@ export function FactoryFloor({session, selected, onSelect}: {session: SessionSna
             <text className="buffer-label" x={bay.queueX + 6} y={bay.queueY + 80}>{input.units}/{input.capacity}</text>
             <title>{asset.input_buffer}: {input.units} units, {input.pallets} pallets</title>
           </g>}
-          <MachineStation asset={asset} metric={session.summary.machine_metrics[asset.id]} x={bay.x} y={bay.y} selected={selected === asset.id} highlighted={scene.highlighted_zone === asset.id} bottleneck={profile.capacity.bottleneck_machines.includes(asset.id)} onSelect={() => onSelect(asset.id)}/>
+          <MachineStation queue={session.summary.buffer_levels[asset.input_buffer]} asset={asset} metric={session.summary.machine_metrics[asset.id]} x={bay.x} y={bay.y} selected={selected === asset.id} highlighted={scene.highlighted_zone === asset.id} bottleneck={profile.capacity.bottleneck_machines.includes(asset.id)} onSelect={() => onSelect(asset.id)}/>
           {alerts.length > 0 && <g className={`map-alert ${alerts.some(a => a.severity === "critical") ? "critical" : "attention"}`} transform={`translate(${bay.x + 159},${bay.y + 105})`}><circle r="9"/><text y="4" textAnchor="middle">!</text><title>{alerts.map(a => a.message).join(" ")}</title></g>}
         </g>;
       })}
-      <g className="floor-annotation"><text x="275" y="436">SHIFT OUTPUT</text><text x="275" y="460">{session.summary.good_production} good · {session.summary.scrap} scrap</text><text x="275" y="481">{session.summary.wip} queued WIP</text><text x="275" y="510">{session.summary.finished_goods_allocated} units allocated</text></g>
+      <g className="floor-annotation"><text x="275" y="436">SHIFT OUTPUT</text><text x="275" y="460">{session.summary.good_production} good · {session.summary.total_scrap ?? session.summary.scrap} scrap</text><text x="275" y="481">{session.summary.wip} queued WIP</text><text x="275" y="510">{session.summary.finished_goods_allocated} units allocated</text></g>
       <g className="floor-annotation"><text x="1030" y="89">LINE SERVICES</text><path className="rack" d="M1030 114h145m-145 36h145M1030 111v62m145-62v62"/><text x="1030" y="199">Tooling &amp; fixtures</text><text x="1030" y="219">Service access</text></g>
       {scene.zones.some(z => z.congested) && <g className="material-token" transform="translate(295,332)"><rect width="27" height="18"/><path d="M27 2h17m-17 14h17M3-3h8m5 0h8M3 21h8m5 0h8"/><title>Material transfer marker: queued WIP requires handling</title></g>}
       <text className="plan-caption" x="275" y="641">FLOW: CUT → MACHINE → WASH ↶ ASSEMBLE → TEST → INSPECT → DISPATCH</text>

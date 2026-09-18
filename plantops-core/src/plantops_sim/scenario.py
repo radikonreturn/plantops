@@ -125,10 +125,10 @@ def make_seeded_line(base: Scenario) -> Scenario:
 
 # Display semantics are keyed by asset identity, never by route position.
 MACHINE_METADATA = {
-    "laser_01": ("laser", "Material jam / lens and nozzle condition", "Clean lens and service nozzle"),
+    "laser_01": ("laser", "Lens contamination / assist-gas instability", "Clean lens / purge gas"),
     "cnc_01": ("cnc", "Spindle and tool wear", "Spindle and tool service"),
-    "wash_01": ("wash", "Filter blockage / bath condition", "Filter and bath service"),
-    "assembly_01": ("assembly", "Fixture jam / station capacity", "Fixture service"),
-    "test_01": ("test", "Calibration interruption / test queue", "Calibration service"),
-    "quality_01": ("quality", "Lot rejection / scrap", ""),
+    "wash_01": ("wash", "Bath concentration / filter differential", "Replace filter / replenish chemical"),
+    "assembly_01": ("assembly", "Staffing shortage / torque tool verification", "Assign cross-trained operator"),
+    "test_01": ("test", "Calibration drift / false failures", "Recalibrate tester"),
+    "quality_01": ("quality", "Inspection load / containment pressure", ""),
 }

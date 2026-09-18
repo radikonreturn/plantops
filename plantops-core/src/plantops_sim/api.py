@@ -263,3 +263,34 @@ def authorize_overtime(session_id: str, request: EmptyShiftActionRequest) -> dic
 @app.post("/sessions/{session_id}/actions/activate-containment")
 def activate_containment(session_id: str, request: EmptyShiftActionRequest) -> dict[str, Any]:
     return run_living_action(session_id, "containment")
+
+
+class EquipmentActionRequest(EmptyShiftActionRequest):
+    machine_id: str = Field(strict=True, min_length=1)
+
+
+@app.post("/sessions/{session_id}/actions/clean-lens")
+def clean_lens(session_id: str, request: EquipmentActionRequest) -> dict[str, Any]:
+    return run_equipment_action(session_id, request.machine_id, "clean-lens")
+
+
+@app.post("/sessions/{session_id}/actions/service-wash")
+def service_wash(session_id: str, request: EquipmentActionRequest) -> dict[str, Any]:
+    return run_equipment_action(session_id, request.machine_id, "service-wash")
+
+
+@app.post("/sessions/{session_id}/actions/assign-support")
+def assign_support(session_id: str, request: EquipmentActionRequest) -> dict[str, Any]:
+    return run_equipment_action(session_id, request.machine_id, "assign-support")
+
+
+@app.post("/sessions/{session_id}/actions/recalibrate-tester")
+def recalibrate_tester(session_id: str, request: EquipmentActionRequest) -> dict[str, Any]:
+    return run_equipment_action(session_id, request.machine_id, "recalibrate-tester")
+
+
+def run_equipment_action(session_id: str, machine_id: str, action: str) -> dict[str, Any]:
+    try:
+        return session_manager.equipment_action(session_id, machine_id, action)
+    except (SessionNotFoundError, UnknownMachineError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

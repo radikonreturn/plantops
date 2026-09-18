@@ -5,8 +5,8 @@ export function LeftRail({session, view, navigate}: {session: SessionSnapshot | 
   const shiftMinutes = s?.shift_minutes ?? 480;
   const elapsed = s?.simulated_minutes ?? 0;
   const timeline = session?.timeline ?? [];
-  const recent = timeline.filter(e => e.state === "decision logged" && e.minute < elapsed).slice(-2);
-  const events = [...recent, ...timeline.filter(e => e.state === "active" || e.minute >= elapsed).slice(0, 9)].map(e => ({...e, text: e.title}));
+  const recent = timeline.filter(e => e.minute <= elapsed && !["scheduled", "PENDING"].includes(e.state) && !e.id.startsWith("due-") && !e.id.startsWith("receipt-")).slice(-4);
+  const events = [...recent, ...timeline.filter(e => !recent.some(r => r.id === e.id) && (e.state === "active" || e.minute > elapsed)).slice(0, 7)].map(e => ({...e, text: e.title}));
   return <aside className="left-rail">
     <section className="rail-timeline"><h2>Shift timeline</h2><div className="timeline-scale" aria-label={`Current shift time ${clock(elapsed)} of ${clock(shiftMinutes)}`}>
       {events.map(event => <i key={event.id} title={`${event.text}: ${clock(event.minute)}`} style={{left: `${Math.min(100, event.minute / shiftMinutes * 100)}%`}} />)}

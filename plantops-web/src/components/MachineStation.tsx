@@ -1,5 +1,5 @@
 import type { AssetConfig, MachineMetric } from "../types";
-import { label, percent } from "../format";
+import { label } from "../format";
 
 function Equipment({role}: {role: AssetConfig["stage_role"]}) {
   switch (role) {
@@ -42,20 +42,20 @@ function Equipment({role}: {role: AssetConfig["stage_role"]}) {
   }
 }
 
-export function MachineStation({asset, metric, x, y, selected, highlighted, bottleneck, onSelect}: {
+export function MachineStation({asset, metric, x, y, selected, highlighted, bottleneck, queue, onSelect}: {
   asset: AssetConfig; metric: MachineMetric; x: number; y: number; selected: boolean;
-  highlighted: boolean; bottleneck: boolean; onSelect: () => void;
+  highlighted: boolean; bottleneck: boolean; queue: number; onSelect: () => void;
 }) {
-  return <g transform={`translate(${x},${y})`} className={`machine-node state-${metric.state.toLowerCase()} ${selected ? "selected" : ""} ${highlighted ? "highlighted" : ""}`}
+  return <g transform={`translate(${x},${y})`} className={`machine-node state-${metric.state.toLowerCase()} ${metric.active_issue ? "condition-warning" : ""} ${selected ? "selected" : ""} ${highlighted ? "highlighted" : ""}`}
     role="button" tabIndex={0} aria-label={`Inspect ${asset.name}, ${label(metric.state)}${asset.attention_reason ? `, ${asset.attention_reason}` : ""}`} onClick={onSelect}
     onKeyDown={e => {if (e.key === "Enter" || e.key === " ") {e.preventDefault(); onSelect();}}}>
-    <title>{asset.fault_mode}{asset.attention_reason ? ` — ${asset.attention_reason}` : ""}</title>
+    <title>{metric.condition_label ? `${metric.condition_label}: ${metric.condition_value?.toFixed(1)} / 100. ${asset.stage_role === "cnc" ? "Higher health is better." : "Lower burden is better."} ` : ""}{asset.fault_mode}{asset.attention_reason ? ` — ${asset.attention_reason}` : ""}</title>
     <rect className="machine-hit" x="-8" y="-38" width="166" height="217" rx="2" />
-    <text className="machine-name" y="-18">{asset.name}</text><circle className="machine-lamp" cx="144" cy="-27" r="5" />
+    <text className="machine-name" y="-18">{asset.id.replace("_", "-").toUpperCase()}</text><circle className="machine-lamp" cx="144" cy="-27" r="5" />
     <Equipment role={asset.stage_role}/>
     <text className="machine-state-label" y="114">{metric.state === "PLANNED_MAINTENANCE" ? "Planned stop" : label(metric.state)}</text>
-    <text className="machine-readout" y="132">{metric.processed} processed · {metric.health.toFixed(0)} health</text>
-    <text className="machine-readout" y="148">{asset.ideal_cycle_minutes} min/unit · {percent(asset.failure_risk)} risk</text>
-    <text className={`machine-readout ${bottleneck ? "capacity-limit" : ""}`} y="164">{bottleneck ? "CAPACITY LIMIT" : asset.fault_mode.split(" / ")[0]}</text>
+    <text className="machine-readout" y="132">{({laser: "Optics", cnc: "Spindle", wash: "Bath/filter", assembly: "Tooling/staff", test: "Calibration", quality: "Inspection load"})[asset.stage_role]} {metric.condition_value?.toFixed(0) ?? metric.health.toFixed(0)}/100</text>
+    <text className="machine-readout" y="148">Queue {queue} · {metric.state === "RUNNING" ? "1 in process" : "0 in process"}</text>
+    <text className={`machine-readout ${bottleneck ? "capacity-limit" : ""}`} y="164">{metric.service?.active ? "SERVICE IN PROGRESS" : metric.service?.pending ? "SERVICE QUEUED" : metric.active_issue ? ({laser: "Lens / gas warning", cnc: "Spindle wear", wash: "Residue exposure", assembly: "Torque / staffing", test: "Drift / retest risk", quality: "Release overload"})[asset.stage_role] : bottleneck ? "CAPACITY LIMIT" : "Condition normal"}</text>
   </g>;
 }

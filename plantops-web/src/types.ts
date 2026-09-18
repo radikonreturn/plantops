@@ -8,7 +8,20 @@ export type MachineState =
   | "DOWN"
   | "PLANNED_MAINTENANCE";
 
+export type EquipmentAction = "clean-lens" | "service-wash" | "assign-support" | "recalibrate-tester";
+export interface EquipmentService {
+  action: EquipmentAction; label: string; cost: number; duration: number;
+  pending: boolean; active: boolean; unavailable_reason: string | null;
+}
+export interface EquipmentQuality {
+  source_rejects: number; downstream_catches: number; rework: number;
+  customer_escapes: number; suspect_finished_goods: number; latent_wip: number;
+}
 export interface MachineMetric {
+  condition_label?: string; condition_value?: number; cycle_time_multiplier?: number;
+  rework?: number; quality_risk?: number; active_issue?: string | null;
+  service?: EquipmentService | null;
+  action_history?: {action: string; requested_minute: number; started_minute: number | null; completed_minute: number | null; cost: number}[];
   state: MachineState;
   processed: number;
   scrap: number;
@@ -97,6 +110,7 @@ export interface BufferLevels {
 }
 
 export interface SimulationSummary {
+  equipment_quality?: EquipmentQuality; total_scrap?: number;
   shift_events?: ShiftEvent[]; overtime?: OvertimeState; quality_containment?: ContainmentState;
   seed: number;
   simulated_minutes: number;
@@ -119,6 +133,7 @@ export interface SimulationSummary {
 
 export interface ShiftEvent {
   id: string; minute: number; end_minute: number; kind: string; title: string; detail: string;
+  root_cause?: string; operational_impact?: string;
   severity: "info" | "attention" | "critical"; zone: string; workspace: Workspace;
   state: "scheduled" | "active" | "resolved" | "expired"; affected_ids: string[]; closed_minute: number | null;
 }
@@ -132,6 +147,7 @@ export interface ContainmentState {
   customer_escapes: number; suspect_finished_units: number;
 }
 export interface CostBreakdown {
+  lens_gas_cleaning?: number; chemical_filter_service?: number; support_labor?: number; tester_calibration?: number;
   emergency_repair: number; preventive_maintenance: number; procurement: number;
   expediting: number; overtime: number; inspection: number; total: number;
 }

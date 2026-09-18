@@ -42,9 +42,9 @@ Vite polls source changes because mounted Windows workspaces can miss native fil
 
 The browser opts into `POST /sessions` with `"scenario_mode": "seeded"`. Omitting the field keeps the classic MVP scenario, preserving existing clients, CLI runs, `/simulate`, and reference event digests. Every session snapshot additionally contains `scenario_profile` and `action_log`.
 
-Profile version 2 uses isolated `scenario-profile:v2` and `scenario-conditions:v2` random streams. Eight handovers configure actual station health, cycle capacity, carried-in WIP, raw stock, order pressure, supplier terms, or final-inspection rejection risk: CNC wear, laser material jam, wash filter restriction, assembly fixture constraint, test calibration pressure, quality containment, material shortage, and competing rush orders. No purchase orders are placed automatically. All orders remain one product family; no fictitious changeovers or multi-product BOM are implied.
+Profile version 2 uses isolated `scenario-profile:v2` and `scenario-conditions:v2` random streams. Eight handovers configure actual station health, cycle capacity, carried-in WIP, raw stock, order pressure, supplier terms, or final-inspection rejection risk: CNC wear, laser contamination, wash filter restriction, assembly tooling/staffing constraint, test calibration pressure, quality containment, material shortage, and competing rush orders. No purchase orders are placed automatically. All orders remain one product family; no fictitious changeovers or multi-product BOM are implied.
 
-For example, replay seed **42** opens CNC wear risk (18 cut blanks before CNC); **0** opens Laser material jam (heavy raw stock); **1** opens Wash filter restriction (18 machined units before wash). Seeds **11**, **7**, **9**, **2**, and **8** demonstrate assembly, test, quality, material, and dispatch concerns respectively. Seeded v2 intentionally changes v1 seed mappings; classic reference digests remain unchanged. New Shift advances to the next seed by default. Expand **Advanced / deterministic replay** in the New Shift dialog to enter any specific seed. A successful New Shift automatically opens **Office / Inbox** and updates the URL hash. Repeat the same decisions at the same simulated times to reproduce the shift.
+For example, replay seed **42** opens CNC wear risk (18 cut blanks before CNC); **0** opens Laser optical contamination (heavy raw stock); **1** opens Wash filter restriction (18 machined units before wash). Seeds **11**, **7**, **9**, **2**, and **8** demonstrate assembly, test, quality, material, and dispatch concerns respectively. Seeded v2 intentionally changes v1 seed mappings; classic reference digests remain unchanged. New Shift advances to the next seed by default. Expand **Advanced / deterministic replay** in the New Shift dialog to enter any specific seed. A successful New Shift automatically opens **Office / Inbox** and updates the URL hash. Repeat the same decisions at the same simulated times to reproduce the shift.
 
 The seeded automotive bracket route is **receiving → laser/cutting → CNC → wash → assembly → functional test/CMM → final quality → finished goods/dispatch**. Classic retains its four stages. Five finite inter-stage buffers carry uniquely identified units. Building geometry is stable across seeds; pallet counts, congestion, machine highlights, conveyor state and dispatch/receiving pressure change with authoritative state.
 
@@ -57,7 +57,7 @@ The seeded automotive bracket route is **receiving → laser/cutting → CNC →
 | Test / CMM | Calibration service | 18 min | 180 |
 | Final Quality | None; automatic lot inspection | — | — |
 
-PM uses the existing engine: only idle, starved or blocked equipment may start; completion restores health and reduces wear-related failure risk. It does not change cycle capacity or lot rejection risk. Equipment faults are modeled as per-unit interruption risks with machine-specific repair durations, not detailed mechanical physics. The failures-disabled option zeroes failure probability for every seeded machine. The quality containment profile sets actual final-inspection rejection probability to 14%; observed scrap remains a separate outcome.
+Legacy PM uses the existing engine: only idle, starved or blocked equipment may start; completion restores health and reduces wear-related exposure. In V4 it also restores the equipment-specific condition, removing its added cycle and quality losses; configured base capacity and lot rejection risk remain unchanged. The table above documents the retained PM endpoints; the V4 controls below use shorter, targeted interventions. The failures-disabled option zeroes failure probability for every seeded machine. The quality containment profile sets actual final-inspection rejection probability to 14%; observed scrap remains a separate outcome.
 
 `scenario_profile` contains a versioned ID, title, manager briefing, initial conditions, primary problem zone, machine role/fault mode/status, effective failure risk, PM availability/duration/cost, input/output buffer IDs, supplier terms, live alerts, capacity context, and `scene`. Scene zones contain actual unit counts, capacity, pallet counts and congestion; routes become active only while the associated machine runs, and expose waiting quantity and output-buffer blocking. Capacity identifies the configured bottleneck assets. Receiving exposes inbound units and uncovered demand; dispatch exposes allocation and at-risk order counts. Finished-goods scene stock means **unallocated** goods, while legacy `buffer_levels.finished` remains total good production. Carry-in WIP uses unique IDs ahead of future supplier receipts and is not counted as production until it passes Quality during this shift.
 
@@ -78,7 +78,7 @@ The permanent left rail opens eight useful views in the same session:
 | Inventory | Storage, inbound material, supplier terms and purchase-order entry |
 | Reports | Interim/shift-end metrics, separate cost ledgers, open risks and actual engine action log |
 
-Priorities affect future allocations only and only break ties between identical due times. Procurement, priority changes and maintenance remain usable while paused. Quality containment is available only on quality-containment profiles; manual inventory reconciliation remains deferred. There is no persistence beyond the in-memory API process, authentication, multiplayer or background simulation worker.
+Priorities affect future allocations only and only break ties between identical due times. Procurement, priority changes and maintenance remain usable while paused. Quality containment is available on quality handovers or detected V4 wash-residue exposure; manual inventory reconciliation remains deferred. There is no persistence beyond the in-memory API process, authentication, multiplayer or background simulation worker.
 
 Build the browser application with:
 
@@ -86,6 +86,142 @@ Build the browser application with:
 cd plantops-web
 npm run build
 ```
+
+## PlantOps V4 — Equipment Diversity & Machine-Specific Failures
+
+V4 extends seeded shifts on the same fixed six-asset route. Classic mode, existing
+endpoints, the V3 event scheduler and classic reference digest remain compatible.
+V4 seeded outcomes intentionally differ from V3: conditions affect production,
+unit quality and recovery instead of relabeling CNC breakdowns.
+
+| Asset | Condition and actual consequence | Recovery |
+| --- | --- | --- |
+| LASER-01 / Cutting | Optical contamination and assist-gas instability increase cutting time and source edge rejects | Clean lens / purge gas: **8 min, 85 cost** |
+| CNC-01 / Machining | Existing spindle health, wear-dependent breakdowns, repair downtime and overtime fatigue | Existing emergency call-out (**350**) or preventive maintenance (**20 min, 250**) |
+| WASH-01 / Cleaning | Bath/filter burden leaves residue on identified parts; mild cycle slowdown, downstream catches or customer escapes | Replace filter / replenish chemical: **12 min, 110 cost**; existing suspect WIP is not cured |
+| ASSEMBLY-01 / Assembly | Tooling/staffing burden reduces capacity and adds **1.2 min** torque verification rework | Cross-trained support: **6 min, 95 cost**; also resolves an active V3 staffing shortage |
+| TEST-01 / Functional Test / CMM | Calibration drift adds false-failure retests (**2.5 min**) and reduces detection of wash residue | Recalibrate tester: **15 min, 160 cost** |
+| QUALITY-01 / Final Quality | Inspection burden plus actual queue occupancy slows release and weakens sampling of upstream defects | Existing intensified containment; **0.6 min and 2 cost per inspection**, catching latent defects but adding release workload |
+
+Condition burden is **0 best / 100 worst**, separate from mechanical health
+(**100 best**). Above 25 burden, losses increase; at 45, an asset warning appears.
+Each machine has independent seeded deterioration. Non-CNC condition upsets now
+increase burden rather than invoking generic spindle-like breakdowns. CNC's seeded
+base exposure varies independently on non-CNC handovers, so other stages can
+become the dominant loss while CNC runs without failure. These are simplified
+operational models, not calibrated physical reliability predictions.
+
+New engine-generated condition events join the three V3 scheduled events when
+control limits are crossed. They carry the actual asset, `root_cause`, and
+`operational_impact`; service completion resolves the warning only when its
+underlying condition is restored. The timeline includes detection, service
+request, the actual production stop, recovery, rework and defect consequences.
+V3 shortages target Assembly; condition warnings use asset-specific language.
+
+### V4 actions and API policy
+
+All commands return a complete authoritative session snapshot:
+
+| POST `/sessions/{id}/actions/…` | Body | Ledger category |
+| --- | --- | --- |
+| `clean-lens` | `{"machine_id":"LASER-01"}` | `lens_gas_cleaning` |
+| `service-wash` | `{"machine_id":"WASH-01"}` | `chemical_filter_service` |
+| `assign-support` | `{"machine_id":"ASSEMBLY-01"}` | `support_labor` |
+| `recalibrate-tester` | `{"machine_id":"TEST-01"}` | `tester_calibration` |
+
+Canonical IDs (`laser_01`, etc.) and existing case/hyphen normalization work.
+Unknown sessions/assets return **404**; malformed/missing/extra fields return
+**422**; wrong-asset, healthy-condition, duplicate, busy-service, classic-mode or
+closed-shift requests return **409** with a reason. Rejections leave state,
+random streams, event queues and costs unchanged.
+
+Actions are intentionally allowed during a control hold. A running station
+finishes its current unit (including any recheck), then stops for service; idle,
+starved and blocked stations stop immediately. Cost commits once at acceptance.
+Time only advances with playback; service may remain unfinished at shift close.
+A queued/active request cannot be duplicated or overlapped with legacy PM.
+Completion restores burden to 5 and health to 100. Service becomes eligible again
+only after burden reaches 25, or when Assembly has an active staffing shortage.
+Existing PM endpoints remain available and also restore equipment condition;
+their original eligibility, duration and cost contracts remain unchanged.
+
+Containment remains the **same V3 action**, with no bypass or competing release
+command. It is available on quality handovers and becomes available in other
+seeded shifts after the wash actually creates residue exposure. It only covers
+inspection cycles started after activation. Service prevents future defects;
+neither service nor containment recalls already-released goods. The original
+6%/12% V3 latent-lot model remains restricted to quality handovers.
+
+### V4 snapshot, quality and accounting
+
+`summary.machine_metrics` adds condition label/value, active issue, effective
+next-cycle multiplier (including staffing and containment workload), rework,
+quality-risk parameter, service availability/reason/cost/duration/pending state,
+service `action_history`, and all per-asset `maintenance_history`. Existing health,
+processed, scrap, downtime, planned time and availability fields remain intact.
+For Quality, the multiplier is an equivalent based on nominal cycle time because
+containment adds a fixed 0.6 minutes. Condition warnings may coexist with a planned
+stop until service actually completes.
+
+`summary.equipment_quality` exposes cutting `source_rejects`, wash-residue
+`downstream_catches`, `rework`, `customer_escapes`, `suspect_finished_goods` and
+`latent_wip`. Defect provenance follows actual unit IDs through the fixed route.
+Retests hold the original unit and consume station time without double-counting
+processed production. Downstream catches are scrapped; rework here means torque
+verification and false-failure retests, not restoration of rejected parts.
+
+`summary.total_scrap` counts **all stations**. For compatibility, `summary.scrap`
+and `quality` retain final-inspection-only semantics; `good_production` remains
+released output and may contain escaped defects. Escapes count only suspect
+finished units allocated to customer orders. Unallocated suspect goods remain a
+separate count. Upstream scrap and rework therefore affect real deliveries even
+though the legacy final-inspection yield definition is unchanged.
+
+The four V4 cost categories are added to `cost_breakdown`. Existing categories
+remain separate: `emergency_repair`, `preventive_maintenance`, `procurement`,
+`expediting` (PO expedite), `overtime`, and `inspection` (containment). `total` sums
+each category once; new service history records request, start, completion and
+committed cost. Ordinary scheduled repair retains its existing no-call-out-charge
+behavior. No warranty costs or revenue model is implied.
+
+Plant View keeps fixed station silhouettes, a state badge, primary condition,
+queue/WIP and a compact issue. Detailed controls/history live in Maintenance and
+Quality; Reports exposes all-stage losses and separate service costs. Navigation
+remains the eight engineering workspaces, without Settings.
+
+### Determinism and local validation
+
+Condition initialization uses isolated `machine:laser`, `machine:wash`,
+`machine:assembly`, `machine:test` and `machine:quality` streams. Quality and rework
+use separate per-asset substreams; CNC shift exposure uses `machine:cnc:shift`,
+while its existing failure/repair streams remain intact. Existing supplier,
+demand, profile and V3 event streams are preserved. Same seed plus the same
+ordered actions at the same simulated times reproduces state, event log, digest,
+timeline, costs and KPIs (excluding the session UUID). Reading snapshots consumes
+no RNG and creates no events. Seed changes never move assets or route buffers.
+`failures_enabled: false` disables stochastic equipment upsets, cutting rejects,
+wash defect generation and rechecks as well as CNC breakdowns; initial capacity
+conditions and V3 events/quality remain modeled.
+
+From the repository root (Python 3.11+ and Node 20+):
+
+```bash
+cd plantops-core
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[test]"
+python -m unittest discover -s tests -v
+cd ../plantops-web
+npm install
+npm run build
+npm run dev:full
+```
+
+Open **http://127.0.0.1:5173**; API docs are **http://127.0.0.1:8010/docs**.
+Tests cover deterministic actions, seed diversity and multiple dominant assets,
+fixed topology, each condition's actual process impact, recovery timing, defect
+conservation/containment, rejected and duplicate commands, separate costs, and
+all existing classic/V3 contracts.
 
 ## PlantOps V3 — Living Shift Operations
 
@@ -113,11 +249,11 @@ All three new commands require a seeded, still-open shift and work while paused.
 | --- | --- | --- |
 | `expedite-purchase-order` | `{"purchase_order_id":"PO-000001"}` | Once per open PO: halves remaining scheduled transit time for **120** cost. Cancels the old receipt event. Original promise remains unchanged; later transport disruption can still delay receipt. Received POs cannot be expedited. |
 | `authorize-overtime` | `{}` | Once before shift close: extends 480 to **540 minutes**, committing **600** labor cost. At completion times in **[480, 540)**, effective per-unit failure probability is multiplied by **1.2**, capped at 1. Zero base failure risk stays zero. Normal-shift probabilities and customer due times do not change. |
-| `activate-containment` | `{}` | Once, on a quality-containment profile only: each subsequently started final-inspection cycle adds **0.6 minutes** and **2** cost and isolates modeled latent defects as scrap. Source rejection probability remains 14%. Already-started inspections and already-released output are not retroactively contained. |
+| `activate-containment` | `{}` | Once, on a quality-containment profile or detected V4 wash-residue exposure: each subsequently started final-inspection cycle adds **0.6 minutes** and **2** cost and isolates modeled latent defects as scrap. Configured source rejection probability remains unchanged. Already-started inspections and already-released output are not retroactively contained. |
 
 Containment adds an explicit latent-defect model on the independent **`quality:latent:v1`** stream. Among units passing ordinary final inspection, 6% (12% during a notice) carry a latent defect. Intensified inspection detects all such modeled latent defects; this is an explicit simplified detection assumption, not a cure for source defects. Without containment they enter finished goods. `customer_escapes` counts suspect unit IDs actually allocated to orders; `suspect_finished_units` counts those still unallocated. Captured latent defects are included in scrap. Extra inspection workload and cost are committed when an inspection starts, including an unfinished inspection at shift close.
 
-For compatibility, `good_production` and `quality` retain their **inspection-release** meanings and may include latent defects. Delivery OTIF measures quantity and deadline only and is not retroactively reduced by escapes; reports show escapes separately and flag them as quality exposure. The model does not include recalls, rework, warranty costs, defect root causes or financial revenue. Equipment rejection bars report observed attribution only.
+For compatibility, `good_production` and `quality` retain their **inspection-release** meanings and may include latent defects. Delivery OTIF measures quantity and deadline only and is not retroactively reduced by escapes; reports show escapes separately and flag them as quality exposure. V3 does not include recalls, warranty costs or financial revenue. V4 adds torque/test rework and equipment defect provenance as documented above; rejection bars report actual asset attribution.
 
 Seeded advancement is capped at the authorized shift end. Production does not start a new cycle at close, and subsequent interventions are rejected. Existing classic advancement semantics remain unchanged. All currency figures use the existing simulation cost units, with no implied currency or economic optimization score.
 

@@ -43,22 +43,22 @@ PROFILE_DEFINITIONS = (
     ProfileDefinition("cnc-wear", "CNC wear risk", "cnc_01", 210, "after_laser_01",
         "The bracket line inherits spindle and tool wear at CNC. Cut blanks are waiting. "
         "Choose a planned spindle service before startup or accept higher breakdown risk to protect dispatch."),
-    ProfileDefinition("laser-jam", "Laser material jam", "laser_01", 310, None,
+    ProfileDefinition("laser-jam", "Laser optical contamination", "laser_01", 310, None,
         "Receiving has delivered a large sheet-blank lot, but the cutting nozzle is in poor condition. "
-        "A material jam can starve every downstream station. Consider lens and nozzle service before cutting."),
+        "Contamination slows cuts and increases edge scrap. Clean the lens and purge assist gas before losses grow."),
     ProfileDefinition("wash-filter", "Wash filter restriction", "wash_01", 210, "after_cnc_01",
-        "Machined brackets are queued before a restricted wash cell. Filter and bath condition raise stop risk. "
-        "Service restores condition; the slower configured wash cycle remains this shift's capacity limit.", 1.55),
-    ProfileDefinition("assembly-fixture", "Assembly fixture constraint", "assembly_01", 200, "after_wash_01",
-        "The previous shift left clean brackets at assembly. A worn fixture raises jam risk and a single "
-        "fixture limits capacity. Fixture service reduces stop risk but does not add station capacity.", 1.65),
+        "Machined brackets are queued before a restricted wash cell. Bath residue can travel downstream undetected. "
+        "Filter and chemical service removes future exposure; inspect existing suspect WIP. The base wash cycle remains constrained.", 1.55),
+    ProfileDefinition("assembly-fixture", "Assembly tooling and staffing pressure", "assembly_01", 200, "after_wash_01",
+        "The previous shift left clean brackets at assembly. Torque tooling and staffing pressure slow work and add rechecks. A single "
+        "fixture limits base capacity. Cross-trained support restores working condition and resolves active staffing shortages.", 1.65),
     ProfileDefinition("test-calibration", "Test calibration pressure", "test_01", 220, "after_assembly_01",
-        "Assembled brackets await functional test and CMM checks. Calibration condition raises interruption "
-        "risk before final inspection. Calibration service restores health; the longer test cycle still limits release.", 1.50),
+        "Assembled brackets await functional test and CMM checks. Drift causes false failures, retests and missed residue "
+        "defects. Recalibration restores detection and removes drift-related cycle losses; base test capacity remains constrained.", 1.50),
     ProfileDefinition("quality-containment", "Quality containment", "quality_01", 240, "after_test_01",
         "Final inspection is receiving a suspect bracket lot with elevated rejection probability. "
-        "Allow replacement material and review delivery commitments. Inspection is automatic; "
-        "there is no manual release override or maintenance action that changes this lot's reject risk."),
+        "Inspection load slows release. Allow replacement material and review delivery commitments. "
+        "Intensified containment catches latent defects at added time and cost; it does not change source lot risk."),
     ProfileDefinition("material-shortage", "Material shortage", "raw", 45, None,
         "Receiving has few steel blanks and the supplier has a long, less reliable lead time. "
         "Place a purchase order early to prevent starvation at cutting and across the bracket line."),
@@ -83,6 +83,9 @@ def make_seeded_shift(base: Scenario, seed: int) -> tuple[Scenario, ShiftProfile
             stage = replace(stage, ideal_cycle_minutes=definition.cycle_minutes)
         if stage.id == "quality_01" and definition.zone == "quality_01":
             stage = replace(stage, scrap_probability=0.14)
+        if stage.id == "cnc_01" and definition.zone != "cnc_01":
+            cnc_rng = streams.get("machine:cnc:shift")
+            stage = replace(stage, failure_probability=cnc_rng.uniform(.0002, .003))
         stages.append(stage)
     rush = definition.zone == "dispatch"
     shortage = definition.zone == "raw"
@@ -132,7 +135,7 @@ def profile_snapshot(
             reason = f"{fault_mode}: health {machine.health:.1f}/100."
             alert(f"wear-{stage.id}", stage.id, "attention",
                   f"{stage.name}: {fault_mode.lower()}; health {machine.health:.1f}/100, "
-                  f"failure risk {simulation.effective_failure_probability(stage.id):.1%} per unit.", "Maintenance")
+                  f"{'failure' if role == 'cnc' or not simulation.equipment else 'condition upset'} risk {simulation.effective_failure_probability(stage.id):.1%} per unit.", "Maintenance")
         elif machine.state == "PLANNED_MAINTENANCE":
             reason = f"{maintenance_label} in progress."
         elif machine.state == "BLOCKED":
@@ -141,6 +144,13 @@ def profile_snapshot(
             reason = f"Waiting for material in {machine.input_buffer}."
         if stage.scrap_probability > 0.05:
             reason = f"Configured lot rejection {stage.scrap_probability:.0%}; {machine.scrap_units} observed scrap."
+        equipment = summary["machine_metrics"][stage.id] if simulation.equipment else {}
+        if equipment.get("active_issue"):
+            reason = equipment["active_issue"]
+            alert(f"condition-{stage.id}", stage.id, "attention", f"{stage.id.replace('_', '-').upper()}: {reason}",
+                  "Quality" if role == "quality" else "Maintenance")
+        if equipment.get("service") and equipment["service"]["pending"]:
+            reason = "Service queued; current unit will finish first."
         machines.append({
             "id": stage.id, "name": stage.name if profile.primary_zone else stage.id.replace("_", "-").upper(),
             "stage_role": role, "fault_mode": fault_mode,
@@ -258,7 +268,7 @@ def profile_snapshot(
 def action_log(simulation: ProductionLineSimulation) -> list[dict[str, Any]]:
     kinds = {"REPAIR_EXPEDITED", "PLANNED_MAINTENANCE_STARTED",
              "ORDER_PRIORITY_CHANGED", "PURCHASE_ORDER_PLACED",
-             "PURCHASE_ORDER_EXPEDITED", "OVERTIME_AUTHORIZED", "QUALITY_CONTAINMENT_ACTIVATED"}
+             "PURCHASE_ORDER_EXPEDITED", "OVERTIME_AUTHORIZED", "QUALITY_CONTAINMENT_ACTIVATED", "EQUIPMENT_SERVICE_REQUESTED"}
     return [
         {"id": index, "minute": event.time, "kind": event.kind,
          "machine_id": event.machine_id, "detail": event.detail}
@@ -285,15 +295,22 @@ def decision_cards(
 
     if machine and machine["maintenance_available"]:
         completed = any(
-            event.kind in {"PLANNED_MAINTENANCE_STARTED", "REPAIR_EXPEDITED"} and event.machine_id == machine["id"]
+            event.kind in {"PLANNED_MAINTENANCE_STARTED", "REPAIR_EXPEDITED", "EQUIPMENT_SERVICE_REQUESTED"} and event.machine_id == machine["id"]
             for event in simulation.event_log
+        )
+        service = summary["machine_metrics"][machine["id"]].get("service")
+        service_detail = (
+            f"{service['label']}: {service['duration']:g} minutes stopped / "
+            f"{service['cost']:g} cost / restores underlying condition after the current unit."
+            if service else f"Service: {machine['maintenance_duration']:g} minutes stopped / "
+            f"{machine['maintenance_cost']:g} cost / restores health to 100."
         )
         cards.append({
             "id": "protect-asset",
             "title": f"Decide on {machine['name']}",
             "detail": (
                 f"{machine['fault_mode']}. {machine['attention_reason'] or 'Review health, queue and delivery exposure before acting.'} "
-                f"Service: {machine['maintenance_duration']:g} minutes stopped / {machine['maintenance_cost']:g} cost / restores health to 100."
+                f"{service_detail}"
             ),
             "workspace": "Maintenance",
             "status": "decision logged" if completed else "open decision",

@@ -316,3 +316,8 @@ td strong { font-weight: 600; }
 .map-events { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 14px; font-size: 12px; }
 .map-alert.critical circle { fill: #993f35; }
 .map-alert.critical text { fill: #fff; }
+
+/* Condition warnings supplement state; a planned stop retains the blue service lamp. */
+.machine-node.condition-warning:not(.state-planned_maintenance) .machine-lamp { fill: #805b20; }
+.machine-node.condition-warning .machine-state-label { fill: #805b20; }
+.machine-node.state-down .machine-lamp { fill: #993f35; }

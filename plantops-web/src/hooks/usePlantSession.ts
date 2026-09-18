@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../api/plantops";
-import type { PlaybackSpeed, SessionSnapshot } from "../types";
+import type { EquipmentAction, PlaybackSpeed, SessionSnapshot } from "../types";
 
 export function usePlantSession() {
   const [session, setSession] = useState<SessionSnapshot | null>(null);
@@ -106,6 +106,7 @@ export function usePlantSession() {
     prioritize: (orderId: string, priority: number) => command(`${orderId} priority saved as ${priority}`, id => api.prioritizeOrder(id, orderId, priority)),
     purchase: (supplierId: string, quantity: number) => command(`Purchase order placed: ${quantity} units from ${supplierId}`, id => api.placePurchaseOrder(id, supplierId, quantity)),
     repair: (machineId: string) => command(`${machineId} emergency repair completed`, id => api.expediteRepair(id, machineId)),
+    service: (machineId: string, action: EquipmentAction) => command(`${machineId} service requested`, id => api.equipmentAction(id, machineId, action)),
     maintain: (machineId: string) => command(`${machineId} preventive maintenance started`, id => api.startPreventiveMaintenance(id, machineId)),
   };
 }

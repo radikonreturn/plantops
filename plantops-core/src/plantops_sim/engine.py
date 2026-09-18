@@ -168,6 +168,8 @@ class ProductionLineSimulation:
                 stage, previous_buffer, output, health=stage.initial_health
             )
             previous_buffer = output
+        from .equipment import EquipmentSystems
+        self.equipment = EquipmentSystems(self) if "laser_01" in self.machines and "test_01" in self.machines else None
         self.orders: dict[str, OrderState] = {}
         self._urgent_order_id: str | None = None
         self._record("SIMULATION_STARTED", detail=f"seed={seed}")
@@ -309,6 +311,8 @@ class ProductionLineSimulation:
             MachineState.PLANNED_MAINTENANCE,
         }:
             return False
+        if self.equipment and self.equipment.start(machine.config.id):
+            return False
         input_buffer = self.buffers[machine.input_buffer]
         output_buffer = self.buffers[machine.output_buffer]
         if not input_buffer.units:
@@ -327,6 +331,8 @@ class ProductionLineSimulation:
             machine.config.ideal_cycle_minutes - machine.config.cycle_jitter,
             machine.config.ideal_cycle_minutes + machine.config.cycle_jitter,
         ))
+        if self.equipment:
+            cycle *= self.equipment.multiplier(machine.config.id)
         if self.living:
             cycle = self.living.cycle_minutes(machine.config.id, unit_id, cycle)
         machine.state = MachineState.RUNNING
@@ -343,6 +349,8 @@ class ProductionLineSimulation:
     def _complete_process(self, machine: Machine, unit_id: int) -> None:
         if machine.state != MachineState.RUNNING or machine.busy_unit != unit_id:
             raise RuntimeError("Invalid completion event")
+        if self.equipment and self.equipment.retest(machine.config.id, unit_id):
+            return
         elapsed = self.clock - next(
             event.time for event in reversed(self.event_log)
             if event.kind == "PROCESS_STARTED" and event.machine_id == machine.config.id and event.unit_id == unit_id
@@ -356,6 +364,8 @@ class ProductionLineSimulation:
         machine.busy_unit = None
         machine.state = MachineState.IDLE
         rejected = bool(machine.config.scrap_probability and self.rng.get(f"scrap:{machine.config.id}").random() < machine.config.scrap_probability)
+        if self.equipment:
+            rejected = self.equipment.process(machine.config.id, unit_id, rejected)
         if self.living and not rejected:
             rejected = self.living.latent_defect(machine.config.id, unit_id)
         if self.living:
@@ -375,6 +385,12 @@ class ProductionLineSimulation:
             and self.rng.get(f"failure:{machine.config.id}").random()
             < failure_probability
         ):
+            if self.equipment and machine.config.id != "cnc_01":
+                condition = self.equipment.conditions[machine.config.id]
+                condition.burden = min(100, condition.burden + 12)
+                self._record("EQUIPMENT_CONDITION_WORSENED", machine.config.id,
+                             detail=self.equipment.impact(machine.config.id))
+                return
             machine.state = MachineState.DOWN
             machine.failures += 1
             repair = self.rng.get(f"repair:{machine.config.id}").uniform(
@@ -431,6 +447,10 @@ class ProductionLineSimulation:
     def start_preventive_maintenance(self, machine_id: str) -> None:
         """Stop an eligible machine for its configured preventive maintenance."""
         machine = self._resolve_machine(machine_id)
+        if self.equipment and machine.config.id in self.equipment.conditions:
+            condition = self.equipment.conditions[machine.config.id]
+            if condition.pending or condition.active:
+                raise ShiftActionUnavailableError("Equipment service already queued or in progress")
         if machine.config.preventive_maintenance_duration <= 0:
             raise PreventiveMaintenanceNotConfiguredError(machine.config.name)
         if machine.state not in {
@@ -476,6 +496,8 @@ class ProductionLineSimulation:
         machine.health = 100.0
         machine.maintenance_count += 1
         machine.state = MachineState.IDLE
+        if self.equipment:
+            self.equipment.restore(machine.config.id)
         self._record("PLANNED_MAINTENANCE_COMPLETED", machine.config.id)
 
     def reprioritize_order(self, order_id: str, priority: int) -> None:
@@ -664,6 +686,9 @@ class ProductionLineSimulation:
             if kind in {"SHIFT_EVENT_START", "SHIFT_EVENT_END"}:
                 assert self.living is not None and target_id is not None
                 self.living.handle_event(kind, target_id)
+            elif kind == "EQUIPMENT_SERVICE_COMPLETED":
+                assert self.equipment is not None and target_id is not None
+                self.equipment.complete_service(target_id)
             elif kind == "OVERTIME_STARTED":
                 self._record("OVERTIME_STARTED", detail="failure_multiplier=1.2;labor_cost_already_committed=600")
             elif kind == "PROCESS_COMPLETED":
@@ -698,6 +723,8 @@ class ProductionLineSimulation:
                 self._complete_preventive_maintenance(machine)
             else:
                 raise RuntimeError(f"Unknown event type: {kind}")
+            if self.equipment:
+                self.equipment.reconcile()
             if self.living:
                 self.living.reconcile()
             if not self.living or self.clock < self.living.end_minute:
@@ -755,6 +782,7 @@ class ProductionLineSimulation:
                 "health": round(machine.health, 3),
                 "availability": round(availability, 4),
                 "performance": round(performance, 4),
+                **(self.equipment.metric(machine_id) if self.equipment else {}),
             }
         average_availability = sum(item["availability"] for item in machine_metrics.values()) / len(machine_metrics)
         average_performance = sum(item["performance"] for item in machine_metrics.values()) / len(machine_metrics)
@@ -772,6 +800,8 @@ class ProductionLineSimulation:
             "simulated_minutes": round(self.clock, 3),
             "shift_minutes": self.living.end_minute if self.living else self.scenario.shift_minutes,
             **(self.living.snapshot() if self.living else {}),
+            **({"equipment_quality": self.equipment.quality_summary(),
+                "total_scrap": sum(m.scrap_units for m in self.machines.values())} if self.equipment else {}),
             "good_production": good,
             "scrap": quality_machine.scrap_units,
             "quality": round(quality, 4),

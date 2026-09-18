@@ -1,5 +1,6 @@
 import type {
   CreateSessionInput,
+  EquipmentAction,
   PlaybackSpeed,
   SessionSnapshot,
 } from "../types";
@@ -164,5 +165,12 @@ export function startPreventiveMaintenance(
 export function livingAction(sessionId: string, action: "authorize-overtime" | "activate-containment" | "expedite-purchase-order", purchaseOrderId?: string): Promise<SessionSnapshot> {
   return request(sessionPath(sessionId, `/actions/${action}`), {
     method: "POST", body: JSON.stringify(purchaseOrderId ? {purchase_order_id: purchaseOrderId} : {}),
+  });
+}
+
+
+export function equipmentAction(sessionId: string, machineId: string, action: EquipmentAction): Promise<SessionSnapshot> {
+  return request(sessionPath(sessionId, `/actions/${action}`), {
+    method: "POST", body: JSON.stringify({machine_id: machineId}),
   });
 }

@@ -166,6 +166,17 @@ class SessionManager:
             session.simulation.place_purchase_order(supplier_id, quantity)
             return self._snapshot(session)
 
+    def equipment_action(self, session_id: str, machine_id: str, action: str) -> dict[str, Any]:
+        """Allowed on control hold; service time passes only after resume/advance."""
+        with self._lock:
+            session = self._require_session(session_id)
+            sim = session.simulation
+            sim._resolve_machine(machine_id)
+            if sim.equipment is None:
+                raise ShiftActionUnavailableError("Equipment actions require scenario_mode seeded")
+            sim.equipment.request(machine_id, action)
+            return self._snapshot(session)
+
     def living_action(self, session_id: str, action: str, po_id: str = "") -> dict[str, Any]:
         with self._lock:
             session = self._require_session(session_id)
@@ -206,6 +217,9 @@ class SessionManager:
             "overtime": summary.get("overtime", {}).get("labor_cost", 0),
             "inspection": summary.get("quality_containment", {}).get("inspection_cost", 0),
         }
+        if session.simulation.equipment:
+            from .equipment import SPECS
+            costs.update({SPECS[mid].cost_category: c.costs for mid, c in session.simulation.equipment.conditions.items() if SPECS[mid].cost_category})
         costs["total"] = round(sum(costs.values()), 2)
         profile["shift_review"]["cost_breakdown"] = costs
         profile["shift_review"]["scorecard"][-1] = {
@@ -219,7 +233,8 @@ class SessionManager:
                  "machine_id": e.machine_id, "detail": e.detail}
                 for index, e in enumerate(session.simulation.event_log)
                 if e.kind in {"MACHINE_FAILED", "REPAIR_COMPLETED", "REPAIR_EXPEDITED",
-                              "PLANNED_MAINTENANCE_STARTED", "PLANNED_MAINTENANCE_COMPLETED"}
+                              "PLANNED_MAINTENANCE_STARTED", "PLANNED_MAINTENANCE_COMPLETED",
+                              "EQUIPMENT_SERVICE_REQUESTED", "EQUIPMENT_SERVICE_STARTED", "EQUIPMENT_SERVICE_COMPLETED"}
             ],
             "cost_breakdown": costs,
             "timeline": shift_timeline(session.simulation, summary),
@@ -246,5 +261,11 @@ def shift_timeline(simulation: ProductionLineSimulation, summary: dict[str, Any]
     rows += [dict(id=e["id"], minute=e["minute"], title=e["title"], state=e["state"], workspace=e["workspace"])
              for e in summary.get("shift_events", [])]
     rows += [dict(id=f"action-{a['id']}", minute=a["minute"], title=a["kind"].replace("_", " ").lower(),
-                  state="decision logged", workspace="Reports") for a in action_log(simulation)]
+                  state="decision logged", workspace="Reports") for a in action_log(simulation)
+             if a["kind"] != "EQUIPMENT_SERVICE_REQUESTED"]
+    rows += [dict(id=f"equipment-{i}", minute=e.time,
+                  title=f"{e.machine_id.replace('_', '-').upper()}: {e.detail or e.kind.lower().replace('_', ' ')}",
+                  state=e.kind.lower().replace("_", " "), workspace="Quality" if e.machine_id in {"wash_01", "test_01", "quality_01"} else "Maintenance")
+             for i, e in enumerate(simulation.event_log)
+             if e.machine_id and (e.kind.startswith("EQUIPMENT_") or e.kind in {"SHIFT_EVENT_RESOLVED", "SHIFT_EVENT_EXPIRED", "MACHINE_FAILED", "REPAIR_COMPLETED", "PLANNED_MAINTENANCE_COMPLETED"})]
     return sorted(rows, key=lambda row: (row["minute"], row["id"]))

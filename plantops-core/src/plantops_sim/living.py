@@ -22,6 +22,8 @@ class ShiftEvent:
     state: Literal["scheduled", "active", "resolved", "expired"] = "scheduled"
     closed_minute: float | None = None
     affected_ids: tuple[str, ...] = ()
+    root_cause: str = ""
+    operational_impact: str = ""
 
 
 class LivingShift:
@@ -29,7 +31,8 @@ class LivingShift:
         self.simulation = simulation
         self.normal_minutes = simulation.scenario.shift_minutes
         self.overtime_authorized = False
-        self.containment_available = primary_zone == "quality_01"
+        self.profile_latent_risk = primary_zone == "quality_01"
+        self.containment_available = self.profile_latent_risk
         self.containment_active = False
         self.inspected_units = 0
         self.inspection_minutes = 0.0
@@ -64,8 +67,20 @@ class LivingShift:
                 zone = "dispatch"
             elif kind == "quality_notice":
                 zone = "quality_01"
+            if kind == "operator_shortage" and simulation.equipment:
+                zone = "assembly_01"
+                title = "ASSEMBLY-01: staffing shortage"
+            if kind == "condition_risk" and simulation.equipment:
+                from .equipment import SPECS
+                issue = SPECS[zone].fault if zone in SPECS else "spindle wear warning"
+                detail = simulation.equipment.impact(zone) if zone in SPECS else "Spindle health falls by 18 points; wear increases breakdown exposure until serviced."
+                title = f"{zone.replace('_', '-').upper()}: {issue}"
+            if kind == "quality_notice":
+                title = "QUALITY-01: containment pressure"
             event = ShiftEvent(f"SHIFT-{index + 1:02d}", minute, minute + 60,
                                kind, title, detail, "critical" if kind == "quality_notice" else "attention", zone, workspace)
+            event.root_cause = title
+            event.operational_impact = detail
             self.events[event.id] = event
             simulation._schedule(minute, "SHIFT_EVENT_START", event.id)
             simulation._schedule(event.end_minute, "SHIFT_EVENT_END", event.id)
@@ -96,7 +111,7 @@ class LivingShift:
         from .engine import ShiftActionUnavailableError
         self.require_open()
         if not self.containment_available or self.containment_active:
-            raise ShiftActionUnavailableError("Containment requires a quality-containment profile and can be activated only once")
+            raise ShiftActionUnavailableError("Containment requires a quality handover or detected wash-residue exposure and can be activated only once")
         self.containment_active = True
         self.simulation._record("QUALITY_CONTAINMENT_ACTIVATED", detail="extra_cycle_minutes=0.6;inspection_cost_per_unit=2;latent_defects_isolated;source_risk_unchanged")
 
@@ -137,9 +152,12 @@ class LivingShift:
         event = self.events[event_id]
         if kind == "SHIFT_EVENT_START":
             event.state = "active"
-            sim._record("SHIFT_EVENT_ACTIVE", detail=f"event_id={event.id};kind={event.kind};{event.detail}")
+            sim._record("SHIFT_EVENT_ACTIVE", machine_id=event.zone if event.zone in sim.machines else None, detail=f"event_id={event.id};kind={event.kind};{event.detail}")
             if event.kind == "condition_risk":
                 sim.machines[event.zone].health = max(0, sim.machines[event.zone].health - 18)
+                if sim.equipment and event.zone in sim.equipment.conditions:
+                    condition = sim.equipment.conditions[event.zone]
+                    condition.burden = min(100, condition.burden + 18)
             elif event.kind == "supplier_delay":
                 for po in sim.purchase_orders.values():
                     if po.status == "OPEN":
@@ -162,7 +180,7 @@ class LivingShift:
     def finish(self, event: ShiftEvent, state: Literal["resolved", "expired"]) -> None:
         event.state = state
         event.closed_minute = self.simulation.clock
-        self.simulation._record(f"SHIFT_EVENT_{state.upper()}", detail=f"event_id={event.id}")
+        self.simulation._record(f"SHIFT_EVENT_{state.upper()}", machine_id=event.zone if event.zone in self.simulation.machines else None, detail=f"event_id={event.id};{event.title};{state}")
 
     def reconcile(self) -> None:
         sim = self.simulation
@@ -194,7 +212,7 @@ class LivingShift:
 
     def latent_defect(self, machine_id: str, unit_id: int) -> bool:
         """Called only for units passing normal inspection; True isolates as scrap."""
-        if machine_id != "quality_01" or not self.containment_available:
+        if machine_id != "quality_01" or not self.profile_latent_risk:
             return False
         risk = 0.12 if any(e.kind == "quality_notice" and e.state == "active" for e in self.events.values()) else 0.06
         defect = self.simulation.rng.get("quality:latent:v1").random() < risk
@@ -221,7 +239,7 @@ class LivingShift:
                          "unavailable_reason": "Shift closed" if closed else "Already authorized" if self.overtime_authorized else None},
             "quality_containment": {"available": self.containment_available, "active": self.containment_active,
                 "unavailable_reason": "Shift closed" if closed else "Already active" if self.containment_active else
-                None if self.containment_available else "Requires a quality-containment profile",
+                None if self.containment_available else "Requires a quality handover or detected wash-residue exposure",
                 "inspected_units": self.inspected_units, "added_inspection_minutes": round(self.inspection_minutes, 3),
                 "inspection_cost": self.inspected_units * 2, "captured_units": self.captured_units,
                 "customer_escapes": escapes, "suspect_finished_units": len(self.escaped_ids) - escapes},
