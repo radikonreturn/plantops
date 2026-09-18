@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from .engine import ProductionLineSimulation, ShiftActionUnavailableError
 from .living import LivingShift
+from .tutorial import TUTORIAL_PROFILE, TUTORIAL_SEED, configure_tutorial, make_tutorial_scenario
 from .scenario import make_mvp_scenario
 from .profiles import CLASSIC_PROFILE, ShiftProfile, action_log, make_seeded_shift, profile_snapshot
 
@@ -56,8 +57,10 @@ class SessionManager:
         scenario_mode: str = "classic",
     ) -> dict[str, Any]:
         self._validate_speed(speed)
-        if scenario_mode not in {"classic", "seeded"}:
-            raise ValueError("Scenario mode must be classic or seeded")
+        if scenario_mode not in {"classic", "seeded", "tutorial"}:
+            raise ValueError("Scenario mode must be classic, seeded or tutorial")
+        if scenario_mode == "tutorial" and not failures_enabled:
+            raise ValueError("Tutorial requires equipment conditions enabled")
         scenario = (
             make_mvp_scenario()
             if failures_enabled
@@ -70,6 +73,8 @@ class SessionManager:
                 scenario = replace(scenario, stages=tuple(
                     replace(stage, failure_probability=0) for stage in scenario.stages
                 ))
+        if scenario_mode == "tutorial":
+            scenario, profile, seed = make_tutorial_scenario(), TUTORIAL_PROFILE, TUTORIAL_SEED
         session = SimulationSession(
             session_id=str(uuid4()),
             simulation=ProductionLineSimulation(scenario, seed=seed),
@@ -78,6 +83,10 @@ class SessionManager:
         )
         if scenario_mode == "seeded":
             session.simulation.living = LivingShift(session.simulation, profile.primary_zone or "cnc_01")
+        if scenario_mode == "tutorial":
+            configure_tutorial(session.simulation)
+            session.simulation.living = LivingShift(session.simulation, "laser_01", schedule_events=False)
+            session.paused = True
         with self._lock:
             self._sessions[session.session_id] = session
             return self._snapshot(session)

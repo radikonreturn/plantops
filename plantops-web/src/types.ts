@@ -171,7 +171,7 @@ export interface CreateSessionInput {
   seed: number;
   failures_enabled: boolean;
   speed: PlaybackSpeed;
-  scenario_mode?: "classic" | "seeded";
+  scenario_mode?: "classic" | "seeded" | "tutorial";
 }
 
 export const workspaces = ["Plant View", "Office / Inbox", "Production Plan", "Orders", "Maintenance", "Quality", "Inventory", "Reports"] as const;

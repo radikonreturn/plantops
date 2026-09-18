@@ -5,7 +5,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .engine import (
     MAX_PURCHASE_QUANTITY,
@@ -50,7 +50,13 @@ class CreateSessionRequest(BaseModel):
     seed: int = Field(default=42, ge=0)
     failures_enabled: bool = True
     speed: Literal[1, 2, 4] = 1
-    scenario_mode: Literal["classic", "seeded"] = "classic"
+    scenario_mode: Literal["classic", "seeded", "tutorial"] = "classic"
+
+    @model_validator(mode="after")
+    def validate_tutorial(self) -> CreateSessionRequest:
+        if self.scenario_mode == "tutorial" and not self.failures_enabled:
+            raise ValueError("Tutorial requires equipment conditions enabled")
+        return self
 
 
 class AdvanceSessionRequest(BaseModel):

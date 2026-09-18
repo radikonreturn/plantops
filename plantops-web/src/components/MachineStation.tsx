@@ -46,7 +46,7 @@ export function MachineStation({asset, metric, x, y, selected, highlighted, bott
   asset: AssetConfig; metric: MachineMetric; x: number; y: number; selected: boolean;
   highlighted: boolean; bottleneck: boolean; queue: number; onSelect: () => void;
 }) {
-  return <g transform={`translate(${x},${y})`} className={`machine-node state-${metric.state.toLowerCase()} ${metric.active_issue ? "condition-warning" : ""} ${selected ? "selected" : ""} ${highlighted ? "highlighted" : ""}`}
+  return <g data-asset={asset.id} transform={`translate(${x},${y})`} className={`machine-node state-${metric.state.toLowerCase()} ${metric.active_issue ? "condition-warning" : ""} ${selected ? "selected" : ""} ${highlighted ? "highlighted" : ""}`}
     role="button" tabIndex={0} aria-label={`Inspect ${asset.name}, ${label(metric.state)}${asset.attention_reason ? `, ${asset.attention_reason}` : ""}`} onClick={onSelect}
     onKeyDown={e => {if (e.key === "Enter" || e.key === " ") {e.preventDefault(); onSelect();}}}>
     <title>{metric.condition_label ? `${metric.condition_label}: ${metric.condition_value?.toFixed(1)} / 100. ${asset.stage_role === "cnc" ? "Higher health is better." : "Lower burden is better."} ` : ""}{asset.fault_mode}{asset.attention_reason ? ` — ${asset.attention_reason}` : ""}</title>

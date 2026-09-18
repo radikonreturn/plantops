@@ -27,7 +27,7 @@ class ShiftEvent:
 
 
 class LivingShift:
-    def __init__(self, simulation: ProductionLineSimulation, primary_zone: str) -> None:
+    def __init__(self, simulation: ProductionLineSimulation, primary_zone: str, *, schedule_events: bool = True) -> None:
         self.simulation = simulation
         self.normal_minutes = simulation.scenario.shift_minutes
         self.overtime_authorized = False
@@ -43,6 +43,8 @@ class LivingShift:
         self.receipt_times: dict[str, float] = {}
         self.receipt_event_ids: dict[str, int] = {}
         self.events: dict[str, ShiftEvent] = {}
+        if not schedule_events:
+            return
         rng = simulation.rng.get("shift-events:v1")
         favored = ("supplier_delay" if primary_zone == "raw" else
                    "customer_escalation" if primary_zone == "dispatch" else

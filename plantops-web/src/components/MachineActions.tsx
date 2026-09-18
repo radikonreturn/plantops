@@ -11,7 +11,7 @@ export function MachineActions({asset, metric, control}: {asset: AssetConfig; me
     : `Preventive maintenance cannot start while ${metric.state.toLowerCase().replace(/_/g, " ")}.`;
   if (asset.stage_role === "quality") return <p>Manage intensified inspection in the Quality workspace. Release capacity and containment workload are tracked there.</p>;
   if (service) return <div className="machine-actions">
-    <button disabled={!!control.busy || !!service.unavailable_reason} onClick={() => void control.service(asset.id, service.action)}>{service.label} · {money(service.cost)}</button>
+    <button data-action={service.action} disabled={!!control.busy || !!service.unavailable_reason} onClick={() => void control.service(asset.id, service.action)}>{service.label} · {money(service.cost)}</button>
     <small>{service.unavailable_reason ?? `${service.duration} min planned stop. Completes the current unit first; restores the underlying condition.`}</small>
     <small>{service.pending ? "Queued at the next cycle boundary." : service.active ? "Service in progress; resume playback to complete." : !service.unavailable_reason ? "Available during control hold; time advances only on playback." : null}</small>
   </div>;

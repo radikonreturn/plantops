@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readStored, writeStored } from "../tutorial/state";
 import * as api from "../api/plantops";
 import type { EquipmentAction, PlaybackSpeed, SessionSnapshot } from "../types";
 
@@ -11,12 +12,13 @@ export function usePlantSession() {
   const initialized = useRef(false);
   const mounted = useRef(true);
   const hold = useRef(false);
-  const [busy, setBusy] = useState<string | null>("Opening shift");
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState("Preparing the shift handover…");
+  const [notice, setNotice] = useState("Choose a shift to begin.");
   const [connectionHold, setConnectionHold] = useState(false);
   const publish = useCallback((snapshot: SessionSnapshot) => {
     current.current = snapshot;
+    writeStored("sessionStorage", "plantops.activeSession", snapshot.session_id);
     if (mounted.current) setSession(snapshot);
   }, []);
   const fail = useCallback((reason: unknown) => {
@@ -26,7 +28,7 @@ export function usePlantSession() {
       setError(reason instanceof Error ? reason.message : "Request failed. Inspect the API response and retry.");
     }
   }, []);
-  const newShift = useCallback(async (seed: number) => {
+  const newShift = useCallback(async (seed: number, mode: "seeded" | "tutorial" = "seeded") => {
     if (newShiftPending.current || commandPending.current) return false;
     if (!Number.isSafeInteger(seed) || seed < 0) {
       setError("Replay seed must be a whole number from 0 to 9007199254740991."); return false;
@@ -36,7 +38,7 @@ export function usePlantSession() {
     locked.current = true;
     try {
       if (current.current && !current.current.paused) publish(await api.pauseSession(current.current.session_id));
-      const created = await api.createSession({seed, speed: 1, failures_enabled: true, scenario_mode: "seeded"});
+      const created = await api.createSession({seed, speed: 1, failures_enabled: true, scenario_mode: mode});
       // Retain the ID if the initial pause response is lost.
       publish(created); publish(await api.pauseSession(created.session_id));
       hold.current = false; setConnectionHold(false);
@@ -57,9 +59,25 @@ export function usePlantSession() {
       return false;
     } finally { locked.current = false; if (mounted.current) setBusy(null); }
   }, [fail, publish]);
+  const restoreSession = useCallback(async () => {
+    const saved = readStored("sessionStorage", "plantops.activeSession");
+    if (!saved || locked.current) return;
+    locked.current = true; setBusy("Restoring shift"); setError(null);
+    try {
+      const fresh = await api.getSession(saved);
+      publish(fresh.paused ? fresh : await api.pauseSession(saved));
+      hold.current = false; setConnectionHold(false);
+      setNotice("Shift restored on control hold. Review the current state before resuming.");
+    } catch (reason) {
+      if (reason instanceof api.PlantOpsApiError && reason.status === 404) {
+        writeStored("sessionStorage", "plantops.activeSession", null);
+        setNotice("The previous in-memory shift is no longer available. Open a new shift or replay the tutorial.");
+      } else fail(reason);
+    } finally { locked.current = false; if (mounted.current) setBusy(null); }
+  }, [publish, fail]);
   useEffect(() => {
     mounted.current = true;
-    if (!initialized.current) { initialized.current = true; void newShift(42); }
+    if (!initialized.current) { initialized.current = true; void restoreSession(); }
     const timer = window.setInterval(() => {
       const snapshot = current.current;
       if (!snapshot || snapshot.paused || hold.current || locked.current || newShiftPending.current || commandPending.current) return;
@@ -80,7 +98,7 @@ export function usePlantSession() {
       })();
     }, 1000);
     return () => { mounted.current = false; window.clearInterval(timer); };
-  }, [newShift, publish, fail]);
+  }, [restoreSession, publish, fail]);
   const command = useCallback(async (message: string, operation: (id: string) => Promise<SessionSnapshot>) => {
     if (busy || commandPending.current || newShiftPending.current) return false;
     commandPending.current = true;
@@ -91,7 +109,7 @@ export function usePlantSession() {
     } finally { commandPending.current = false; }
   }, [act, busy]);
   return {
-    session, busy, error, notice, connectionHold, newShift,
+    session, busy, error, notice, connectionHold, newShift, restoreSession,
     overtime: () => command("Overtime authorized: 60 minutes / 600 labor cost", id => api.livingAction(id, "authorize-overtime")),
     contain: () => command("Quality containment activated", id => api.livingAction(id, "activate-containment")),
     expeditePurchase: (poId: string) => command(`${poId} expedited / 120 cost`, id => api.livingAction(id, "expedite-purchase-order", poId)),
