@@ -136,3 +136,13 @@ Office / Inbox keeps the handover and decision board concise. Decision cards sta
 The three V3 controls are intentionally sparse and state-backed: one purchase-order expedite, one 60-minute overtime authorization with its documented fatigue exposure, and one quality containment activation on supported profiles. Quality presents ordinary scrap separately from modeled latent customer escapes and containment workload. Maintenance presents current exposure and service history. These decisions remain compact controls inside their relevant engineering workspace and inherit the existing square panels, ruled tables, and restrained operational palette.
 
 Responsive behavior preserves the fixed factory plan as an internally scrollable physical map. Embedded order charts preserve their minimum readable row width through horizontal scrolling rather than expanding the page. Timeline secondary labels use the light charcoal-rail text token for readable contrast, and rejection meters carry equipment-specific accessible names.
+
+## V4 Equipment Conditions
+
+The fixed six-station plan retains its equipment silhouettes and compact readouts: asset ID, state, primary condition, input queue/in-process quantity, and a short issue. Optical contamination, bath/filter burden, tooling/staffing burden, calibration drift and inspection load use lower-is-better condition values; CNC retains higher-is-better spindle health. Labels and tooltips explain the distinction. Amber condition warnings accompany explicit issue text; planned service keeps its blue lamp until production resumes.
+
+Machine-specific interventions live in Maintenance, relevant Quality rows and temporary asset dialogs. Their labels, costs, eligibility, queue state and unavailable reasons come from the session snapshot. A service can wait for the current unit before its planned stop; history distinguishes request, start and completion. Disabled controls do not claim availability. Office decision cards quote the same targeted service trade-offs and acknowledge recorded decisions.
+
+Quality separates cutting rejects, downstream residue catches, rechecks, latent WIP, customer escapes and suspect finished goods. Plant View and Reports use all-stage scrap; final-inspection yield keeps its existing meaning. Reports exposes each service cost separately. The timeline retains recent production consequences and recovery alongside upcoming commitments, using actual asset names and operational descriptions.
+
+The eight engineering workspaces, restrained palette, ruled readings, fixed building geometry and internal mobile map/table scrolling remain unchanged. Backend conditions may change the highlighted station across seeds; rendering never creates faults, production or recovery.
