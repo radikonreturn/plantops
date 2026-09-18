@@ -14,6 +14,26 @@ PlantOps models the authoritative operational state of a small manufacturing lin
 
 The repository now includes the first playable operator console in `plantops-web/`. It is a deliberately dense MES/SCADA-style browser surface: the factory floor is the main view, while orders, purchasing, repairs, and preventive maintenance remain backed by the authoritative in-memory session API.
 
+## Production Docker deployment
+
+From the repository root, with Docker Compose installed:
+
+```bash
+docker compose up --build -d
+docker compose ps
+curl http://localhost:8080/api/health
+docker compose down
+```
+
+Open <http://localhost:8080>. Only the web service publishes a host port;
+`PLANTOPS_PORT` overrides the default of 8080. The frontend is built with
+`VITE_API_BASE_URL=/api`, and Nginx forwards `/api/` to the internal API on
+port 8010, stripping the prefix (for example, `/api/sessions` becomes
+`/sessions`). Frontend routes fall back to `index.html`. The web service waits
+for the API healthcheck before starting, and both services restart unless
+stopped. Sessions intentionally remain in memory and are lost when the API
+restarts; no database or persistent volume is configured.
+
 ## Playable web console
 
 Start both the FastAPI backend and Vite operator console together from WSL:

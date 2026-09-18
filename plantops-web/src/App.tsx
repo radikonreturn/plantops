@@ -12,8 +12,9 @@ import { MaintenanceView } from "./views/MaintenanceView";
 import { QualityView } from "./views/QualityView";
 import { InventoryView } from "./views/InventoryView";
 import { Coach } from "./tutorial/Coach";
-import { emptyProgress, readStored, restoreProgress, tutorialStep, writeStored } from "./tutorial/state";
+import { emptyProgress, restoreProgress, tutorialStep, writeStored } from "./tutorial/state";
 import { ReportsView } from "./views/ReportsView";
+import { LoginScreen } from "./components/LoginScreen";
 
 function viewFromHash(): Workspace {
   const hash = window.location.hash.slice(1);
@@ -49,11 +50,7 @@ export default function App() {
     setProgress(p => ({...p, dismissed: true}));
     writeStored("localStorage", "plantops.tutorial.status", step === 7 ? "completed" : "dismissed");
   };
-  if (!session) return <main className="start-screen"><section><h1>PlantOps</h1><p>Artemis Manufacturing · Production control</p><h2>Your shift starts here</h2><p>Read the handover, diagnose the line, act and measure the result.</p>
-    <div className="start-options"><section><h2>Guided first shift</h2><p>{readStored("localStorage", "plantops.tutorial.status") ? "Replay a short guided shift with a real cutting-condition decision." : "Recommended for first-time players. Learn the engineering loop on one short, real shift."}</p><button className="primary" disabled={!!busy} onClick={replay}>Guided first shift</button></section>
-    <section><h2>Open simulation</h2><p>Take the handover for a normal seeded shift. All engineering workspaces are available.</p><button disabled={!!busy} onClick={() => void control.newShift(42)}>Open simulation</button></section></div>
-    <p role={error ? "alert" : "status"}>{error ?? busy ?? notice}</p>{readStored("sessionStorage", "plantops.activeSession") && <><button disabled={!!busy} onClick={() => void control.restoreSession()}>Resume saved shift</button> <button disabled={!!busy} onClick={() => {writeStored("sessionStorage", "plantops.activeSession", null); replay();}}>Replay tutorial</button></>}
-  </section></main>;
+  if (!session) return <LoginScreen control={control} replay={replay} />;
   return <div className="app-shell" data-tutorial-step={step ?? undefined} data-workspace={view}><a className="skip-link" href="#workspace-content">Skip to workspace</a>
     <ControlBar control={control}/><div className="application-body"><LeftRail session={session} view={view} navigate={navigate}/>
     <main id="workspace-content" className="workspace-content">

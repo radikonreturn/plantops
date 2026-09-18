@@ -1,0 +1,19 @@
+services:
+  api:
+    build:
+      context: ./plantops-core
+    expose:
+      - "8010"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./plantops-web
+      args:
+        VITE_API_BASE_URL: /api
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${PLANTOPS_PORT:-8080}:80"
+    restart: unless-stopped

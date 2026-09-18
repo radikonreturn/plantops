@@ -1,0 +1,514 @@
+/* ==========================================================================
+   PlantOps Industrial Login Screen Styles
+   SCADA / MES high-tech aesthetic matching Artemis Manufacturing Plant 01
+   ========================================================================== */
+
+@keyframes statusPulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 6px #22c55e, 0 0 10px rgba(34, 197, 94, 0.6);
+  }
+  50% {
+    opacity: 0.55;
+    box-shadow: 0 0 3px #22c55e, 0 0 5px rgba(34, 197, 94, 0.3);
+  }
+}
+
+@keyframes subtleFloat {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.login-viewport {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background-color: #080d14;
+  color: #f1f5f9;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Background with industrial 3D props and ambient vignette */
+.login-backdrop {
+  position: absolute;
+  inset: -20px;
+  background-image: url("/login-bg.png");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+  will-change: transform;
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0.2, 1);
+  filter: brightness(0.96) contrast(1.04);
+}
+
+.login-backdrop-overlay {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 50%, rgba(8, 13, 20, 0.2) 0%, rgba(6, 10, 16, 0.75) 100%);
+  pointer-events: none;
+}
+
+/* Floating particles canvas */
+.login-particles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ==========================================================================
+   Top Telemetry Bar
+   ========================================================================== */
+.login-topbar {
+  position: relative;
+  z-index: 10;
+  height: 38px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  background: rgba(7, 12, 18, 0.75);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.topbar-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-brand {
+  font-family: "Inter", sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  color: #f8fafc;
+  letter-spacing: -0.01em;
+}
+
+.topbar-plant {
+  color: #cbd5e1;
+  font-weight: 500;
+}
+
+.topbar-divider {
+  color: rgba(255, 255, 255, 0.2);
+  font-weight: 300;
+  user-select: none;
+}
+
+.topbar-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #22c55e;
+}
+
+.topbar-led {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.8);
+}
+
+.topbar-led.pulsing {
+  animation: statusPulse 2s infinite ease-in-out;
+}
+
+.topbar-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #cbd5e1;
+  font-weight: 500;
+}
+
+.topbar-clock {
+  color: #f1f5f9;
+  font-variant-numeric: tabular-nums;
+}
+
+.topbar-uptime {
+  color: #94a3b8;
+}
+
+.topbar-uptime strong {
+  color: #e2e8f0;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.topbar-fullscreen-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  color: #94a3b8;
+  padding: 4px 6px;
+  min-height: unset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.topbar-fullscreen-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #f8fafc;
+}
+
+/* ==========================================================================
+   Center Login Card
+   ========================================================================== */
+.login-content {
+  position: relative;
+  z-index: 5;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 20px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: rgba(13, 22, 35, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8),
+              inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  padding: 34px 36px 30px;
+  text-align: center;
+  will-change: transform;
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0.2, 1),
+              box-shadow 0.2s ease;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.login-logo-grid {
+  display: grid;
+  grid-template-columns: 16px 16px;
+  grid-template-rows: 16px 16px;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.login-logo-tile {
+  background-color: #e2e8f0;
+  border-radius: 2px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.login-logo-tile.tile-empty {
+  background-color: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  box-shadow: none;
+}
+
+.login-brand-meta {
+  text-align: left;
+}
+
+.login-brand-title {
+  font-size: 27px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  margin: 0;
+  font-family: "Inter", sans-serif;
+}
+
+.login-brand-sub {
+  font-size: 8.5px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  margin: 5px 0 0 0;
+  font-family: "Inter", sans-serif;
+}
+
+.login-card-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 0 24px 0;
+  border: none;
+}
+
+.login-card-heading {
+  font-size: 21px;
+  font-weight: 600;
+  color: #ffffff;
+  margin: 0 0 22px 0;
+  letter-spacing: -0.015em;
+  font-family: "Inter", sans-serif;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  text-align: left;
+}
+
+.login-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.login-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #94a3b8;
+  letter-spacing: 0.01em;
+}
+
+.login-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.login-input-icon {
+  position: absolute;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  color: #64748b;
+  pointer-events: none;
+  transition: color 0.15s ease;
+}
+
+.login-input-wrap:focus-within .login-input-icon {
+  color: #60a5fa;
+}
+
+.login-input {
+  width: 100%;
+  height: 42px;
+  padding: 10px 14px 10px 38px;
+  background: rgba(10, 16, 26, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+  color: #f8fafc;
+  font-size: 14px;
+  font-family: "Inter", sans-serif;
+  font-weight: 400;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+}
+
+.login-input::placeholder {
+  color: #475569;
+}
+
+.login-input:focus {
+  outline: none;
+  background: rgba(15, 23, 42, 0.95);
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+.login-btn-primary {
+  width: 100%;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: "Inter", sans-serif;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+  margin-top: 4px;
+}
+
+.login-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.5);
+}
+
+.login-btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+
+.login-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.login-arrow-icon {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.15s ease;
+}
+
+.login-btn-primary:hover:not(:disabled) .login-arrow-icon {
+  transform: translateX(3px);
+}
+
+/* Secondary Shift Options Drawer */
+.login-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.login-mode-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 4px 0;
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.login-mode-toggle:hover {
+  color: #94a3b8;
+  background: transparent;
+}
+
+.login-mode-pills {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+
+.login-mode-pill {
+  flex: 1;
+  padding: 6px 8px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.login-mode-pill:hover {
+  background: rgba(30, 41, 59, 0.8);
+  color: #e2e8f0;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.login-mode-pill.active {
+  background: rgba(37, 99, 235, 0.2);
+  border-color: #3b82f6;
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.login-status-msg {
+  font-size: 11px;
+  text-align: center;
+  margin: 6px 0 0 0;
+  min-height: 16px;
+}
+
+.login-status-msg.error {
+  color: #f87171;
+}
+
+.login-status-msg.notice {
+  color: #94a3b8;
+}
+
+.login-footer {
+  margin-top: 24px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: #64748b;
+  letter-spacing: 0.03em;
+  font-family: "Inter", sans-serif;
+}
+
+/* Spinner */
+.login-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .login-topbar {
+    height: auto;
+    padding: 8px 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .topbar-group {
+    gap: 8px;
+    font-size: 10px;
+  }
+  .topbar-center {
+    display: none;
+  }
+  .login-card {
+    padding: 26px 20px 22px;
+  }
+}

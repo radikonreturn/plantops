@@ -9,10 +9,11 @@ export function ControlBar({control}: {control: PlantSession}) {
   const s = session?.summary;
   const ended = !!s && s.simulated_minutes >= s.shift_minutes;
   const paused = !session || session.paused || control.connectionHold;
+  const opName = localStorage.getItem("plantops.operatorName");
   return <>
     <header className="app-header">
       <div className="brand"><svg viewBox="0 0 30 30" aria-hidden="true"><path d="M3 26V12l8-5v7l8-5v7h8v10ZM5 5h4v5M8 20h3m5 0h3m4 0h2" /></svg><strong>PlantOps</strong></div>
-      <div className="plant-identity"><strong>Artemis Manufacturing</strong><span>Plant 01 · Component line A</span></div>
+      <div className="plant-identity"><strong>Artemis Manufacturing</strong><span>{opName ? `Op: ${opName} · Plant 01` : "Plant 01 · Component line A"}</span></div>
       <div className="header-clock"><strong>{clock(s?.simulated_minutes ?? 0)}</strong><span>/ {clock(s?.shift_minutes ?? 480)}</span><progress aria-label="Shift progress" max={s?.shift_minutes ?? 480} value={s?.simulated_minutes ?? 0} /></div>
       <div className="header-kpis"><span>Production <b>{s?.good_production ?? 0}</b></span><span>OEE <b>{percent(s?.oee ?? null)}</b></span><span>OTIF <b>{percent(s?.order_summary.otif ?? null)}</b></span><span>WIP / backlog <b>{s?.wip ?? 0} / {s?.order_summary.backlog_units ?? 0}</b></span></div>
       <div className="shift-buttons"><button className="primary" disabled={!!busy || !session || (ended && session.paused)} onClick={() => void control.toggle()}>{ended ? "Shift complete" : control.connectionHold ? "Reconnect" : paused ? "Start shift" : "Pause"}</button><div className="speed-group" aria-label="Playback speed">{([1, 2, 4] as const).map(speed => <button key={speed} aria-pressed={session?.speed === speed} disabled={!!busy || !session} onClick={() => void control.speed(speed)}>{speed}×</button>)}</div><button disabled={!!busy} onClick={() => {setSeed(""); setNewShiftOpen(true);}}>New Shift</button></div>
