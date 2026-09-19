@@ -1,3 +1,4 @@
+import { decisionFeedback, type DecisionFeedback } from "../decisions/feedback";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { localizeSession } from "../i18n/backend";
@@ -20,6 +21,7 @@ export function usePlantSession() {
   const [error, setError] = useState<Message | string | null>(null);
   const [notice, setNotice] = useState(message("Choose a shift to begin."));
   const [connectionHold, setConnectionHold] = useState(false);
+  const [feedback, setFeedback] = useState<DecisionFeedback | null>(null);
   const publish = useCallback((snapshot: SessionSnapshot) => {
     current.current = snapshot;
     writeStored("sessionStorage", "plantops.activeSession", snapshot.session_id);
@@ -45,6 +47,7 @@ export function usePlantSession() {
     if (!Number.isSafeInteger(seed) || seed < 0) {
       setError(message("Replay seed must be a whole number from 0 to 9007199254740991.")); return false;
     }
+    setFeedback(null);
     newShiftPending.current = true; setBusy(message("Opening shift")); setError(null);
     while (locked.current) await new Promise(resolve => window.setTimeout(resolve, 30));
     locked.current = true;
@@ -67,7 +70,7 @@ export function usePlantSession() {
       let snapshot = current.current;
       if (snapshot && !snapshot.paused) snapshot = await api.pauseSession(snapshot.session_id);
       if (snapshot) publish(snapshot);
-      if (mounted.current) setSession(null);
+      if (mounted.current) { setSession(null); setFeedback(null); }
       window.location.hash = "";
       setNotice(message("Shift saved. Resume it from the main menu when ready."));
       return true;
@@ -76,8 +79,14 @@ export function usePlantSession() {
   }, [fail, publish]);
   const act = useCallback(async (message: Message, operation: (id: string) => Promise<SessionSnapshot>) => {
     if (locked.current || !current.current) return false;
-    locked.current = true; setBusy(message); setError(null);
-    try { publish(await operation(current.current.session_id)); setNotice(message); return true; }
+    locked.current = true; setBusy(message); setError(null); setFeedback(null);
+    try {
+      const before = current.current;
+      const after = await operation(before.session_id);
+      publish(after);
+      if (mounted.current) setFeedback(decisionFeedback(before, after, message));
+      setNotice(message); return true;
+    }
     catch (reason) {
       fail(reason);
       // Reconcile a potentially accepted action; never retry a chargeable command.
@@ -139,6 +148,8 @@ export function usePlantSession() {
     session: displaySession,
     busy: resolveMessage(locale, busy), error: resolveMessage(locale, error), notice: resolveMessage(locale, notice),
     connectionHold, newShift, restoreSession, returnToMenu,
+    feedback, dismissFeedback: () => setFeedback(null),
+    decide: (eventId: string, choiceId: string) => command(message("Shift decision accepted"), id => api.resolveDecision(id, eventId, choiceId)),
     overtime: () => command(message("Overtime authorized: 60 minutes / 600 labor cost"), id => api.livingAction(id, "authorize-overtime")),
     contain: () => command(message("Quality containment activated"), id => api.livingAction(id, "activate-containment")),
     expeditePurchase: (poId: string) => command(message("{value1} expedited / 120 cost", {value1: poId}), id => api.livingAction(id, "expedite-purchase-order", poId)),

@@ -683,7 +683,7 @@ class ProductionLineSimulation:
                 self._cancelled_event_ids.remove(event_id)
                 continue
             self.clock = time
-            if kind in {"SHIFT_EVENT_START", "SHIFT_EVENT_END"}:
+            if kind in {"SHIFT_EVENT_START", "SHIFT_EVENT_END", "SHIFT_DECISION_DEADLINE"}:
                 assert self.living is not None and target_id is not None
                 self.living.handle_event(kind, target_id)
             elif kind == "EQUIPMENT_SERVICE_COMPLETED":

@@ -319,7 +319,7 @@ def profile_snapshot(
 
 
 def action_log(simulation: ProductionLineSimulation) -> list[dict[str, Any]]:
-    kinds = {"REPAIR_EXPEDITED", "PLANNED_MAINTENANCE_STARTED",
+    kinds = {"SHIFT_DECISION_ACCEPTED", "SHIFT_DECISION_EXPIRED", "MANAGEMENT_OBJECTIVE_CHANGED", "REPAIR_EXPEDITED", "PLANNED_MAINTENANCE_STARTED",
              "ORDER_PRIORITY_CHANGED", "PURCHASE_ORDER_PLACED",
              "PURCHASE_ORDER_EXPEDITED", "OVERTIME_AUTHORIZED", "QUALITY_CONTAINMENT_ACTIVATED", "EQUIPMENT_SERVICE_REQUESTED"}
     return [
@@ -440,7 +440,12 @@ def decision_cards(
             card["decision_logged"] = "decision logged" in card["status"]
         if simulation.clock >= summary["shift_minutes"]:
             card["status"] = "outcome observed" + ("; decision logged" if card["decision_logged"] else "; no decision logged")
-    return cards[:3]
+    dynamic = [{"id": e["id"], "title": e["title"], "detail": e["detail"],
+                "workspace": e["workspace"], "status": e["state"],
+                "decision_logged": e["selected_choice"] is not None}
+               for e in summary.get("shift_events", [])
+               if e["id"].startswith("SHIFT-") and e["state"] == "active"]
+    return dynamic + cards[:3]
 
 
 def shift_review(
@@ -496,6 +501,7 @@ def shift_review(
         "headline": headline,
         "conclusion": conclusion,
         "actions_recorded": len(actions),
+        "decision_review": summary.get("decision_review"),
         "event_history": summary.get("shift_events", []),
         "quality_containment": summary.get("quality_containment"),
         "scorecard": [
@@ -505,6 +511,10 @@ def shift_review(
                        if simulation.machines[simulation.scenario.stages[-1].id].processed_units else "No inspections completed yet")},
             {"id": "resilience", "label": "Equipment resilience", "status": resilience_status,
              "value": f"{failures} failure(s) · {downtime:.1f} unplanned min"},
+            *([{"id": "responsiveness", "label": "Decision responsiveness",
+                "status": "attention" if summary["decision_review"]["ignored"] else "good",
+                "value": f"{summary['decision_review']['answered']} answered / {summary['decision_review']['ignored']} expired"}]
+              if simulation.living else []),
             {"id": "cost", "label": "Procurement commitment", "status": cost_status,
              "value": f"{committed_procurement:.2f} committed material cost"},
         ],

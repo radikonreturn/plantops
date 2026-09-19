@@ -2,6 +2,7 @@ import type { MachineState, SessionSnapshot } from "../types";
 import type { AudioCue } from "./audioTypes";
 
 export interface AudioFrame {
+  decisions: Record<string, {state: string; selected: string | null; due: boolean; objective: boolean}>;
   session: string;
   minute: number;
   ended: boolean;
@@ -16,6 +17,10 @@ export interface AudioFrame {
 export function audioFrame(snapshot: SessionSnapshot): AudioFrame {
   const s = snapshot.summary;
   return {
+    decisions: Object.fromEntries((snapshot.shift_events ?? []).filter(e => e.choices?.length || e.kind === "management_objective").map(e => [e.id, {
+      state: e.state, selected: e.selected_choice ?? null, objective: e.kind === "management_objective",
+      due: e.state === "active" && (e.deadline_minute ?? e.end_minute) - s.simulated_minutes <= 5,
+    }])),
     session: snapshot.session_id, minute: s.simulated_minutes,
     ended: s.simulated_minutes >= s.shift_minutes, paused: snapshot.paused,
     machines: Object.fromEntries(Object.entries(s.machine_metrics).map(([id, m]) => [id, { state: m.state, failures: m.failures }])),
@@ -41,9 +46,16 @@ export function audioTransitions(previous: AudioFrame, next: AudioFrame): AudioC
   for (const [id, phase] of Object.entries(next.orders)) {
     if (previous.orders[id] !== phase && phase !== "none") cues.add(phase);
   }
+  for (const [id, decision] of Object.entries(next.decisions)) {
+    const old = previous.decisions[id];
+    if (decision.state === "active" && old?.state !== "active") cues.add(decision.objective ? "objective" : "decisionNew");
+    if (decision.selected && decision.selected !== old?.selected) cues.add("decisionAccepted");
+    if (decision.state === "expired" && old?.state !== "expired") cues.add("decisionExpired");
+    if (!decision.objective && decision.due && !old?.due) cues.add("decisionDue");
+  }
   if (next.received > previous.received) cues.add("delivery");
   if (next.production > previous.production) cues.add("production");
   if (!previous.ended && next.ended) cues.add("shiftEnd");
   return [...cues];
 }
-export const cuePriority: AudioCue[] = ["failure", "late", "maintenanceStart", "maintenanceEnd", "delivery", "shiftEnd", "due", "flowWarning", "production"];
+export const cuePriority: AudioCue[] = ["failure", "late", "maintenanceStart", "maintenanceEnd", "delivery", "objective", "decisionExpired", "decisionAccepted", "decisionDue", "decisionNew", "shiftEnd", "due", "flowWarning", "production"];

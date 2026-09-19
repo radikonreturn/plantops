@@ -6,7 +6,7 @@ export interface AudioSettings {
   ambience: number;
   alerts: number;
 }
-export type AudioCue = "failure" | "late" | "maintenanceStart" | "maintenanceEnd" | "delivery" | "due" | "flowWarning" | "production" | "shiftEnd" | "click";
+export type AudioCue = "objective" | "decisionNew" | "decisionDue" | "decisionExpired" | "decisionAccepted" | "failure" | "late" | "maintenanceStart" | "maintenanceEnd" | "delivery" | "due" | "flowWarning" | "production" | "shiftEnd" | "click";
 export const defaultAudioSettings: AudioSettings = { muted: false, master: 0.32, ambience: 0.55, alerts: 0.65 };
 const storageKey = "plantops.audio.v1";
 export function normalizeSettings(value: Partial<AudioSettings> | null): AudioSettings {

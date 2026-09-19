@@ -181,3 +181,10 @@ export function equipmentAction(sessionId: string, machineId: string, action: Eq
     method: "POST", body: JSON.stringify({machine_id: machineId}),
   });
 }
+
+
+export function resolveDecision(sessionId: string, eventId: string, choiceId: string): Promise<SessionSnapshot> {
+  return request(sessionPath(sessionId, "/actions/resolve-decision"), {
+    method: "POST", body: JSON.stringify({ event_id: eventId, choice_id: choiceId }),
+  });
+}

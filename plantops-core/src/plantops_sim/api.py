@@ -302,3 +302,17 @@ def run_equipment_action(session_id: str, machine_id: str, action: str) -> dict[
         return session_manager.equipment_action(session_id, machine_id, action)
     except (SessionNotFoundError, UnknownMachineError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+class ResolveDecisionRequest(EmptyShiftActionRequest):
+    event_id: str = Field(strict=True, min_length=1)
+    choice_id: str = Field(strict=True, min_length=1)
+
+
+@app.post("/sessions/{session_id}/actions/resolve-decision")
+def resolve_decision(session_id: str, request: ResolveDecisionRequest) -> dict[str, Any]:
+    from .living import UnknownShiftDecisionError
+    try:
+        return session_manager.resolve_decision(session_id, request.event_id, request.choice_id)
+    except (SessionNotFoundError, UnknownShiftDecisionError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

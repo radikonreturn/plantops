@@ -3,11 +3,11 @@ import type { PlantAudio } from "../audio/usePlantAudio";
 import { useState } from "react";
 import { LanguageSelector, useI18n } from "../i18n";
 import type { PlantSession } from "../hooks/usePlantSession";
-import type { Difficulty } from "../types";
+import type { Difficulty, Workspace } from "../types";
 import { clock } from "../format";
 import { readStored } from "../tutorial/state";
 import { Modal } from "./Modal";
-export function ControlBar({control, onExit, audio}: {audio?: PlantAudio; control: PlantSession; onExit?: () => Promise<boolean>}) {
+export function ControlBar({control, onExit, audio, navigate}: {navigate?: (view: Workspace) => void; audio?: PlantAudio; control: PlantSession; onExit?: () => Promise<boolean>}) {
   const { t, percent } = useI18n();
   const {session, busy} = control;
   const [newShiftOpen, setNewShiftOpen] = useState(false);
@@ -24,7 +24,7 @@ export function ControlBar({control, onExit, audio}: {audio?: PlantAudio; contro
       <div className="plant-identity"><strong>Artemis Manufacturing</strong><span>{opName ? t("Op: {value1} · Plant 01", {value1: opName}) : t("Plant 01 · Component line A")}</span></div>
       <div className="header-clock"><strong>{clock(s?.simulated_minutes ?? 0)}</strong><span>/ {clock(s?.shift_minutes ?? 480)}</span><progress aria-label={t("Shift progress")} max={s?.shift_minutes ?? 480} value={s?.simulated_minutes ?? 0} /></div>
       <div className="header-kpis"><span>{t("Production") + " "}<b>{s?.good_production ?? 0}</b></span><span>OEE <b>{percent(s?.oee ?? null)}</b></span><span>OTIF <b>{percent(s?.order_summary.otif ?? null)}</b></span><span>{t("WIP / backlog") + " "}<b>{s?.wip ?? 0} / {s?.order_summary.backlog_units ?? 0}</b></span></div>
-      <div className="shift-buttons"><LanguageSelector />{audio && <AudioControls audio={audio} />}<button className="primary" disabled={!!busy || !session || (ended && session.paused)} onClick={() => void control.toggle()}>{ended ? t("Shift complete") : control.connectionHold ? t("Reconnect") : paused ? t("Start shift") : t("Pause")}</button><div className="speed-group" aria-label={t("Playback speed")}>{([1, 2, 4] as const).map(speed => <button key={speed} aria-pressed={session?.speed === speed} disabled={!!busy || !session} onClick={() => void control.speed(speed)}>{speed}×</button>)}</div><button disabled={!!busy} onClick={() => {setSeed(""); setDifficulty(session?.difficulty ?? "normal"); setNewShiftOpen(true);}}>{t("New Shift")}</button><button disabled={!!busy} onClick={() => setExitOpen(true)}>{t("Main menu")}</button></div>
+      <div className="shift-buttons"><LanguageSelector />{session?.shift_events?.some(e => e.state === "active" && (e.choices?.length || e.kind === "management_objective")) && <button onClick={() => navigate?.("Office / Inbox")}>{t("Active decisions: {count}", { count: session.shift_events.filter(e => e.state === "active" && (e.choices?.length || e.kind === "management_objective")).length })}</button>}{audio && <AudioControls audio={audio} />}<button className="primary" disabled={!!busy || !session || (ended && session.paused)} onClick={() => void control.toggle()}>{ended ? t("Shift complete") : control.connectionHold ? t("Reconnect") : paused ? t("Start shift") : t("Pause")}</button><div className="speed-group" aria-label={t("Playback speed")}>{([1, 2, 4] as const).map(speed => <button key={speed} aria-pressed={session?.speed === speed} disabled={!!busy || !session} onClick={() => void control.speed(speed)}>{speed}×</button>)}</div><button disabled={!!busy} onClick={() => {setSeed(""); setDifficulty(session?.difficulty ?? "normal"); setNewShiftOpen(true);}}>{t("New Shift")}</button><button disabled={!!busy} onClick={() => setExitOpen(true)}>{t("Main menu")}</button></div>
     </header>
     {newShiftOpen && <Modal title={t("Open a new shift")} onClose={() => setNewShiftOpen(false)}>
       <p>{t("The current shift will be left paused. The new shift starts with its own handover, material condition and customer commitments.")}</p>

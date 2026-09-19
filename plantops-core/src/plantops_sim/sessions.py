@@ -96,7 +96,7 @@ class SessionManager:
             difficulty=difficulty,
         )
         if scenario_mode == "seeded":
-            session.simulation.living = LivingShift(session.simulation, profile.primary_zone or "cnc_01")
+            session.simulation.living = LivingShift(session.simulation, profile.primary_zone or "cnc_01", difficulty=difficulty)
         if scenario_mode == "tutorial":
             configure_tutorial(session.simulation)
             session.simulation.living = LivingShift(session.simulation, "laser_01", schedule_events=False)
@@ -216,6 +216,16 @@ class SessionManager:
                 raise ShiftActionUnavailableError("Unknown shift action")
             return self._snapshot(session)
 
+    def resolve_decision(self, session_id: str, event_id: str, choice_id: str) -> dict[str, Any]:
+        with self._lock:
+            session = self._require_session(session_id)
+            living = session.simulation.living
+            if living is None:
+                from .living import UnknownShiftDecisionError
+                raise UnknownShiftDecisionError("Unknown shift event")
+            living.decide(event_id, choice_id)
+            return self._snapshot(session)
+
     def _require_session(self, session_id: str) -> SimulationSession:
         try:
             return self._sessions[session_id]
@@ -233,6 +243,8 @@ class SessionManager:
         profile = profile_snapshot(session.simulation, session.profile, summary)
         living = session.simulation.living
         costs = {
+            "event_decisions": living.decision_cost if living else 0,
+            "energy": living.energy_cost if living else 0,
             "emergency_repair": session.intervention_cost,
             "preventive_maintenance": session.preventive_maintenance_cost,
             "procurement": summary["supply_summary"]["procurement_committed_cost"],

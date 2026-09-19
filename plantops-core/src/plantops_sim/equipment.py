@@ -136,7 +136,7 @@ class EquipmentSystems:
         if sim.machines[mid].state in {MachineState.DOWN, MachineState.PLANNED_MAINTENANCE}:
             return "Complete the current repair or maintenance first"
         staffing_shortage = mid == "assembly_01" and sim.living and any(
-            e.kind == "operator_shortage" and e.zone == mid and e.state == "active"
+            e.kind == "operator_shortage" and e.zone == mid and sim.living.effect_active(e)
             for e in sim.living.events.values()
         )
         if c.burden < 25 and not staffing_shortage:
@@ -258,12 +258,19 @@ class EquipmentSystems:
 
     def active_shortage(self, mid: str) -> bool:
         return bool(self.sim.living and any(
-            e.kind == "operator_shortage" and e.zone == mid and e.state == "active"
+            e.kind == "operator_shortage" and e.zone == mid and self.sim.living.effect_active(e)
             for e in self.sim.living.events.values()
         ))
 
     def effective_cycle_multiplier(self, mid: str) -> float:
-        multiplier = self.multiplier(mid) * (1.4 if self.active_shortage(mid) else 1)
+        multiplier = self.multiplier(mid)
+        if self.sim.living:
+            for event in self.sim.living.events.values():
+                if event.kind == "operator_shortage" and self.sim.living.effect_active(event):
+                    if event.zone == mid:
+                        multiplier *= 1 + .4 * event.pressure
+                    elif mid == "test_01" and event.selected_choice == "rebalance":
+                        multiplier *= 1.15
         if mid == "quality_01" and self.sim.living and self.sim.living.containment_active:
             multiplier += .6 / self.sim.machines[mid].config.ideal_cycle_minutes
         return multiplier

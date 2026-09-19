@@ -133,6 +133,10 @@ export interface SimulationSummary {
 }
 
 export interface ShiftEvent {
+  start_minute?: number; deadline_minute?: number; choices?: EventChoice[];
+  selected_choice?: string | null; resolved_minute?: number | null;
+  outcome?: string | null; expected?: string; no_action?: string;
+  decision_cost?: number; pressure?: number; effect_until?: number;
   id: string; minute: number; end_minute: number; kind: string; title: string; detail: string;
   root_cause?: string; operational_impact?: string;
   severity: "info" | "attention" | "critical"; zone: string; workspace: Workspace;
@@ -148,12 +152,14 @@ export interface ContainmentState {
   customer_escapes: number; suspect_finished_units: number;
 }
 export interface CostBreakdown {
+  event_decisions?: number; energy?: number;
   lens_gas_cleaning?: number; chemical_filter_service?: number; support_labor?: number; tester_calibration?: number;
   emergency_repair: number; preventive_maintenance: number; procurement: number;
   expediting: number; overtime: number; inspection: number; total: number;
 }
 export interface TimelineEntry {id: string; minute: number; title: string; state: string; workspace: Workspace}
 export interface SessionSnapshot {
+  management_objective?: ManagementObjective | null; decision_review?: DecisionReview;
   shift_events?: ShiftEvent[]; overtime?: OvertimeState; quality_containment?: ContainmentState;
   maintenance_history: ActionRecord[];
   cost_breakdown: CostBreakdown; timeline: TimelineEntry[];
@@ -219,10 +225,38 @@ export interface DecisionCard {
   status: string; decision_logged: boolean;
 }
 export interface ShiftReview {
+  decision_review?: DecisionReview;
   cost_breakdown: CostBreakdown; event_history: ShiftEvent[]; quality_containment: ContainmentState | null;
   state: "interim" | "final";
   headline: string;
   conclusion: string;
   actions_recorded: number;
   scorecard: {id: string; label: string; status: "good" | "attention" | "critical"; value: string}[];
+}
+
+export interface EventChoice {
+  id: string;
+  label: string;
+  expected: string;
+  cost: number;
+  unavailable_reason: string | null;
+}
+export interface ManagementObjective {
+  event_id: string;
+  target_id: string;
+  kind: "protect_order" | "throughput";
+  start_minute: number;
+  target: number;
+  status: "open" | "achieved" | "missed";
+}
+export interface DecisionReview {
+  received: number;
+  answered: number;
+  ignored: number;
+  decision_cost: number;
+  energy_cost: number;
+  customer_value: number;
+  objective: ManagementObjective | null;
+  observed: { delivered: number; scrap: number; failures: number };
+  note: string;
 }

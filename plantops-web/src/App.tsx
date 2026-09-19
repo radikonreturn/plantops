@@ -1,3 +1,5 @@
+import { ShiftDecisions } from "./decisions/ShiftDecisions";
+import { DecisionFeedbackCard } from "./decisions/DecisionFeedbackCard";
 import { usePlantAudio } from "./audio/usePlantAudio";
 import { useEffect, useState } from "react";
 import { useI18n } from "./i18n";
@@ -56,10 +58,12 @@ export default function App() {
   };
   if (!session) return <LoginScreen control={control} replay={replay} />;
   return <div className="app-shell" data-tutorial-step={step ?? undefined} data-workspace={view}><a className="skip-link" href="#workspace-content">{t("Skip to workspace")}</a>
-    <ControlBar audio={audio} control={control} onExit={control.returnToMenu}/><div className="application-body"><LeftRail session={session} view={view} navigate={navigate}/>
+    <ControlBar navigate={navigate} audio={audio} control={control} onExit={control.returnToMenu}/><div className="application-body"><LeftRail session={session} view={view} navigate={navigate}/>
     <main id="workspace-content" className="workspace-content">
       <div className={`operation-feedback ${error ? "has-error" : ""}`} role={error ? "alert" : "status"}><span className="signal"/><span>{error ?? busy ?? notice}{error && " " + t("Playback held; use Reconnect before continuing.")}</span></div>
       {session ? <>
+        {control.feedback && <DecisionFeedbackCard result={control.feedback} dismiss={control.dismissFeedback} navigate={navigate} />}
+        <ShiftDecisions control={control} workspace={view} />
         {step && <Coach step={step} control={control} view={view} navigate={navigate} skip={dismiss} replay={replay} runFirst={() => setProgress(p => ({...p, runFirst: true}))} review={() => {setProgress(p => ({...p, reviewed: true})); writeStored("localStorage", "plantops.tutorial.status", "completed");}}/>}
         <div className="shift-context"><strong>{session.scenario_profile.title}</strong><span>{session.summary.simulated_minutes >= session.summary.shift_minutes ? t("Shift closed · outcome recorded") : session.paused ? t("Shift paused · decisions remain available") : t("Live shift")}</span><button onClick={() => navigate("Office / Inbox")}>{t("Read handover")}</button></div>
         {view === "Plant View" && <><FactoryFloor session={session} selected={selected} onSelect={inspect}/><OrderBoard session={session} busy={!!busy} save={control.prioritize}/></>}

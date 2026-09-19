@@ -4,6 +4,7 @@ import { createMachineVoice } from "./machineProfiles";
 import { audioFrame, audioTransitions, cuePriority, type AudioFrame } from "./snapshotAudio";
 
 const tones: Record<AudioCue, [number, number, number]> = {
+  objective: [410, 610, .23], decisionNew: [360, 460, .13], decisionDue: [410, 370, .15], decisionExpired: [310, 220, .2], decisionAccepted: [440, 540, .12],
   failure: [190, 125, 0.38], late: [330, 240, 0.28],
   maintenanceStart: [140, 85, 0.18], maintenanceEnd: [390, 520, 0.22],
   delivery: [260, 370, 0.24], due: [420, 390, 0.16],

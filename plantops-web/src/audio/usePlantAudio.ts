@@ -15,7 +15,7 @@ export function bindAudioInteractions(engine: AudioEngine, target: Document, act
     if (button?.disabled || button?.getAttribute("aria-disabled") === "true") return;
     void engine.activate().then(active => { if (attached && active) activated(); });
     // Keyboard activation produces one native click too; only that click is sonified.
-    if (event.type === "click" && button && !button.closest('.speed-group, [data-audio-controls]')) engine.playCue("click");
+    if (event.type === "click" && button && !button.closest('.speed-group, [data-audio-controls], [data-decision-action]')) engine.playCue("click");
   };
   const visibility = () => engine.setHidden(target.hidden);
   target.addEventListener("click", interact, true);
