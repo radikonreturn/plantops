@@ -33,7 +33,7 @@ class ScenarioProfileTests(unittest.TestCase):
             profile = snapshot["scenario_profile"]
             self.assertEqual(len(profile["decision_cards"]), 3)
             self.assertEqual(profile["shift_review"]["state"], "interim")
-            self.assertEqual(len(profile["shift_review"]["scorecard"]), 4)
+            self.assertEqual(len(profile["shift_review"]["scorecard"]), 5)
             self.assertTrue(all(card["workspace"] for card in profile["decision_cards"]))
         self.assertEqual(first["scenario_profile"]["decision_cards"], second["scenario_profile"]["decision_cards"])
         self.manager.advance_session(first["session_id"], 480)
