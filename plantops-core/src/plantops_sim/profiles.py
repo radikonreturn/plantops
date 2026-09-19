@@ -20,6 +20,7 @@ class ShiftProfile:
     title: str
     briefing: str
     primary_zone: str | None = None
+    difficulty: str = "normal"
 
 
 CLASSIC_PROFILE = ShiftProfile(
@@ -107,6 +108,58 @@ def make_seeded_shift(base: Scenario, seed: int) -> tuple[Scenario, ShiftProfile
     return replace(line, raw_material_units=definition.stock + rng.randint(0, 24),
                    stages=tuple(stages), orders=orders, suppliers=(supplier,), initial_wip=wip), ShiftProfile(
         f"{definition.key}-v2", definition.title, definition.briefing, definition.zone)
+
+
+def apply_difficulty(
+    scenario: Scenario, profile: ShiftProfile, difficulty: str,
+) -> tuple[Scenario, ShiftProfile]:
+    """Apply deterministic challenge modifiers without consuming an RNG stream.
+
+    The seed still owns the shift profile and all stochastic outcomes. Difficulty only
+    changes the operating envelope, so the same seed + difficulty + decisions remains
+    replayable.
+    """
+    if difficulty not in {"easy", "normal", "hard"}:
+        raise ValueError("Difficulty must be easy, normal or hard")
+    if difficulty == "normal":
+        return scenario, replace(profile, difficulty=difficulty)
+
+    easy = difficulty == "easy"
+    stages = tuple(replace(
+        stage,
+        initial_health=min(100, stage.initial_health + 12) if easy else max(15, stage.initial_health - 10),
+        failure_probability=min(1, stage.failure_probability * (0.70 if easy else 1.50)),
+        scrap_probability=min(1, stage.scrap_probability * (0.80 if easy else 1.35)),
+    ) for stage in scenario.stages)
+    orders = tuple(replace(
+        order,
+        quantity=max(1, round(order.quantity * (0.90 if easy else 1.12))),
+        due_minute=order.due_minute + (30 if easy else -25),
+    ) for order in scenario.orders)
+    suppliers = tuple(replace(
+        supplier,
+        min_lead_minutes=max(1, supplier.min_lead_minutes + (-8 if easy else 10)),
+        max_lead_minutes=max(1, supplier.max_lead_minutes + (-8 if easy else 15)),
+        late_probability=max(0, min(1, supplier.late_probability + (-0.08 if easy else 0.15))),
+        max_delay_minutes=max(0, supplier.max_delay_minutes + (-10 if easy else 15)),
+    ) for supplier in scenario.suppliers)
+    urgent = scenario.urgent_order_rule
+    if urgent is not None:
+        urgent = replace(
+            urgent,
+            min_quantity=max(1, round(urgent.min_quantity * (0.90 if easy else 1.12))),
+            max_quantity=max(1, round(urgent.max_quantity * (0.90 if easy else 1.12))),
+            lead_time_minutes=urgent.lead_time_minutes + (15 if easy else -10),
+        )
+    adjusted = replace(
+        scenario,
+        raw_material_units=max(0, scenario.raw_material_units + (40 if easy else -35)),
+        stages=stages,
+        orders=orders,
+        suppliers=suppliers,
+        urgent_order_rule=urgent,
+    )
+    return adjusted, replace(profile, difficulty=difficulty)
 
 
 def profile_snapshot(

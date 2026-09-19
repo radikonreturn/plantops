@@ -19,7 +19,7 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 360px; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button { min-height: 32px; padding: 6px 11px; border: 1px solid #aab3ad; border-radius: 2px; background: #f5f5ee; color: var(--ink); cursor: pointer; font-size: 12px; font-weight: 600; }
 button:hover:not(:disabled) { background: #dfe8e7; border-color: var(--blue); }
 button:disabled { opacity: .48; cursor: not-allowed; }
@@ -27,6 +27,8 @@ button.primary { background: var(--blue); border-color: var(--blue); color: #fff
 button.primary:hover:not(:disabled) { background: #355869; }
 input { min-height: 32px; width: 100%; padding: 5px 8px; border: 1px solid #9fa9a4; border-radius: 2px; background: #fff; color: var(--ink); font-variant-numeric: tabular-nums; caret-color: var(--blue); }
 input:disabled { background: #e6e8e1; color: #68716d; }
+select { min-height: 32px; padding: 5px 8px; border: 1px solid #9fa9a4; background: #fff; color: var(--ink); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 :focus-visible { outline: 2px solid #467487; outline-offset: 3px; }
 ::selection { background: #b9d0d3; color: #14292e; }
 * { scrollbar-color: #8b9994 #e0e3db; scrollbar-width: thin; }
@@ -330,6 +332,8 @@ td strong { font-weight: 600; }
 .start-options > section { border-top: 1px solid #bfc4ba; padding-top: 12px; }
 .tutorial-coach { margin: 16px 20px; padding: 12px 16px; border: 1px solid #805b20; background: #f6f5ef; }
 .tutorial-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tutorial-progress { width: 100%; margin: 8px 0 4px; }
+.tutorial-mode-note { margin: 0 0 8px; color: var(--muted); font-size: 11px; }
 .tutorial-coach h2 { font-size: 16px; margin: 8px 0; }
 .tutorial-coach p { max-width: 85ch; margin: 8px 0; }
 .tutorial-coach button { margin-bottom: 4px; }

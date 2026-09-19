@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { LanguageSelector, useI18n } from "../i18n";
 import type { PlantSession } from "../hooks/usePlantSession";
+import type { Difficulty } from "../types";
 import { readStored, writeStored } from "../tutorial/state";
 import "../styles/login.css";
 
@@ -19,6 +20,10 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
   });
   const [mode, setMode] = useState<"open" | "tutorial" | "resume">(() => {
     return hasSavedSession ? "resume" : "open";
+  });
+  const [difficulty, setDifficulty] = useState<Difficulty>(() => {
+    const saved = readStored("localStorage", "plantops.difficulty");
+    return saved === "easy" || saved === "hard" ? saved : "normal";
   });
   const [nameError, setNameError] = useState<"Enter a name between 2 and 24 characters." | null>(null);
   const [reducedMotion, setReducedMotion] = useState(() =>
@@ -160,7 +165,8 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
       await control.restoreSession();
     } else {
       // Default to standard seeded shift (42)
-      await control.newShift(42);
+      writeStored("localStorage", "plantops.difficulty", difficulty);
+      await control.newShift(42, "seeded", difficulty);
     }
   };
 
@@ -331,6 +337,28 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
                 {t(nameError)}
               </p>
             )}
+
+            {mode === "open" && (
+              <fieldset className="login-difficulty">
+                <legend>{t("Difficulty")}</legend>
+                <div className="login-difficulty-grid">
+                  {(["easy", "normal", "hard"] as const).map((level) => (
+                    <button
+                      key={level}
+                      type="button"
+                      className={difficulty === level ? "active" : ""}
+                      aria-pressed={difficulty === level}
+                      onClick={() => setDifficulty(level)}
+                    >
+                      <strong>{t(level === "easy" ? "Easy" : level === "normal" ? "Normal" : "Hard")}</strong>
+                      <span>{t(level === "easy" ? "More material · lower equipment risk" : level === "normal" ? "Balanced operating pressure" : "Tighter deadlines · higher equipment risk")}</span>
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+            )}
+
+            {mode === "tutorial" && <p className="login-tutorial-note">{t("Guided shift uses a fixed practice scenario and explains each decision in order.")}</p>}
 
             <button
               type="submit"

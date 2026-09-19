@@ -13,6 +13,8 @@ export function Coach({step, control, view, navigate, skip, runFirst, review, re
   const titles = [t("Read the shift handover"), t("Protect the customer commitment"), t("Inspect LASER-01"), t("Weigh the service decision"), t("Observe the shift in motion"), t("Measure the operational result"), t("First shift reviewed")];
   return <section className="tutorial-coach" aria-label={t("Guided shift coaching")}>
     <div className="tutorial-heading"><strong>{t("Guided shift · Step {value1} of 7", {value1: step})}</strong><button onClick={skip}>{step === 7 ? t("Continue this shift") : step === 1 && s.summary.simulated_minutes > 0 ? t("Exit tutorial") : t("Skip tutorial")}</button></div>
+    <progress className="tutorial-progress" aria-label={t("Tutorial progress")} max={7} value={step}/>
+    <p className="tutorial-mode-note">{t("Practice scenario · guided difficulty")}</p>
     <h2>{titles[step - 1]}</h2>
     {step === 1 && <>{s.summary.simulated_minutes > 0 && <p>{t("This shift is already underway.") + " "}<button onClick={() => navigate("Office / Inbox")}>{t("Resume tutorial")}</button>{" " + t("by reopening the handover, or exit coaching to keep playing.")}</p>}<p>{t("Your supervisor left a cutting-condition concern. Open the first-shift handover in Office / Inbox before making a decision.")}</p>{view !== "Office / Inbox" && <button onClick={() => navigate("Office / Inbox")}>{t("Open Office / Inbox")}</button>}</>}
     {step === 2 && <><p>{t("The priority order needs 30 brackets by minute 50. Quantity, due time and quality all matter. Look at the route and waiting material.")}</p><button onClick={() => navigate("Plant View")}>{t("Open Plant View")}</button></>}

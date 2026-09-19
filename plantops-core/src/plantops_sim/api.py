@@ -51,6 +51,7 @@ class CreateSessionRequest(BaseModel):
     failures_enabled: bool = True
     speed: Literal[1, 2, 4] = 1
     scenario_mode: Literal["classic", "seeded", "tutorial"] = "classic"
+    difficulty: Literal["easy", "normal", "hard"] = "normal"
 
     @model_validator(mode="after")
     def validate_tutorial(self) -> CreateSessionRequest:
@@ -115,6 +116,7 @@ def create_session(request: CreateSessionRequest) -> dict[str, Any]:
         failures_enabled=request.failures_enabled,
         speed=request.speed,
         scenario_mode=request.scenario_mode,
+        difficulty=request.difficulty,
     )
 
 

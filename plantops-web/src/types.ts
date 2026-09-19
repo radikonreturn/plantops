@@ -1,4 +1,5 @@
 export type PlaybackSpeed = 1 | 2 | 4;
+export type Difficulty = "easy" | "normal" | "hard";
 
 export type MachineState =
   | "IDLE"
@@ -159,6 +160,7 @@ export interface SessionSnapshot {
   session_id: string;
   paused: boolean;
   speed: PlaybackSpeed;
+  difficulty: Difficulty;
   intervention_cost: number;
   preventive_maintenance_cost: number;
   summary: SimulationSummary;
@@ -172,6 +174,7 @@ export interface CreateSessionInput {
   failures_enabled: boolean;
   speed: PlaybackSpeed;
   scenario_mode?: "classic" | "seeded" | "tutorial";
+  difficulty?: Difficulty;
 }
 
 export const workspaces = ["Plant View", "Office / Inbox", "Production Plan", "Orders", "Maintenance", "Quality", "Inventory", "Reports"] as const;
@@ -197,7 +200,7 @@ export interface Supplier {
   late_probability: number; max_delay_minutes: number; unit_cost: number;
 }
 export interface ScenarioProfile {
-  id: string; title: string; briefing: string; primary_zone: string | null; active_alerts: OperationalAlert[];
+  id: string; title: string; briefing: string; primary_zone: string | null; difficulty?: Difficulty; active_alerts: OperationalAlert[];
   machines: AssetConfig[]; suppliers: Supplier[];
   initial_conditions: {raw_units: number; wip: Record<string, number>; machine_health: Record<string, number>};
   scene: {zones: SceneZone[]; highlighted_zone: string | null;

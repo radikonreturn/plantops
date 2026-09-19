@@ -4,7 +4,7 @@ import { localizeSession } from "../i18n/backend";
 import { message, resolveMessage, type Message } from "../i18n/core";
 import { readStored, writeStored } from "../tutorial/state";
 import * as api from "../api/plantops";
-import type { EquipmentAction, PlaybackSpeed, SessionSnapshot } from "../types";
+import type { Difficulty, EquipmentAction, PlaybackSpeed, SessionSnapshot } from "../types";
 
 export function usePlantSession() {
   const { locale } = useI18n();
@@ -36,7 +36,11 @@ export function usePlantSession() {
         : reason instanceof Error ? reason.message : message("Request failed. Inspect the API response and retry."));
     }
   }, []);
-  const newShift = useCallback(async (seed: number, mode: "seeded" | "tutorial" = "seeded") => {
+  const newShift = useCallback(async (
+    seed: number,
+    mode: "seeded" | "tutorial" = "seeded",
+    difficulty: Difficulty = "normal",
+  ) => {
     if (newShiftPending.current || commandPending.current) return false;
     if (!Number.isSafeInteger(seed) || seed < 0) {
       setError(message("Replay seed must be a whole number from 0 to 9007199254740991.")); return false;
@@ -46,7 +50,7 @@ export function usePlantSession() {
     locked.current = true;
     try {
       if (current.current && !current.current.paused) publish(await api.pauseSession(current.current.session_id));
-      const created = await api.createSession({seed, speed: 1, failures_enabled: true, scenario_mode: mode});
+      const created = await api.createSession({seed, speed: 1, failures_enabled: true, scenario_mode: mode, difficulty});
       // Retain the ID if the initial pause response is lost.
       publish(created); publish(await api.pauseSession(created.session_id));
       hold.current = false; setConnectionHold(false);
@@ -55,6 +59,20 @@ export function usePlantSession() {
       return true;
     } catch (reason) { fail(reason); return false; }
     finally { locked.current = false; newShiftPending.current = false; if (mounted.current) setBusy(null); }
+  }, [fail, publish]);
+  const returnToMenu = useCallback(async () => {
+    if (locked.current || newShiftPending.current || commandPending.current) return false;
+    locked.current = true; setBusy(message("Saving shift")); setError(null);
+    try {
+      let snapshot = current.current;
+      if (snapshot && !snapshot.paused) snapshot = await api.pauseSession(snapshot.session_id);
+      if (snapshot) publish(snapshot);
+      if (mounted.current) setSession(null);
+      window.location.hash = "";
+      setNotice(message("Shift saved. Resume it from the main menu when ready."));
+      return true;
+    } catch (reason) { fail(reason); return false; }
+    finally { locked.current = false; if (mounted.current) setBusy(null); }
   }, [fail, publish]);
   const act = useCallback(async (message: Message, operation: (id: string) => Promise<SessionSnapshot>) => {
     if (locked.current || !current.current) return false;
@@ -120,7 +138,7 @@ export function usePlantSession() {
   return {
     session: displaySession,
     busy: resolveMessage(locale, busy), error: resolveMessage(locale, error), notice: resolveMessage(locale, notice),
-    connectionHold, newShift, restoreSession,
+    connectionHold, newShift, restoreSession, returnToMenu,
     overtime: () => command(message("Overtime authorized: 60 minutes / 600 labor cost"), id => api.livingAction(id, "authorize-overtime")),
     contain: () => command(message("Quality containment activated"), id => api.livingAction(id, "activate-containment")),
     expeditePurchase: (poId: string) => command(message("{value1} expedited / 120 cost", {value1: poId}), id => api.livingAction(id, "expedite-purchase-order", poId)),

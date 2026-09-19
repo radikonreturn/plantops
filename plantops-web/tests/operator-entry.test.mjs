@@ -75,7 +75,7 @@ function harness({ name = '', saved = false, denied = false, reduced = false } =
   const { LoginScreen } = load(loginSource, { '../tutorial/state': policy });
   const calls = [];
   const control = { busy: null, error: null, notice: null,
-    newShift: async seed => calls.push(['open', seed]), restoreSession: async () => calls.push(['resume']) };
+    newShift: async (...args) => calls.push(['open', ...args]), restoreSession: async () => calls.push(['resume']) };
   let tree;
   const render = () => {
     cursor = 0;
@@ -99,6 +99,9 @@ function harness({ name = '', saved = false, denied = false, reduced = false } =
     mode(label) {
       find(n => n.props.className === 'login-mode-toggle').props.onClick(); render();
       find(n => n.type === 'button' && typeof n.props.children === 'string' && n.props.children.trim() === label).props.onClick(); render();
+    },
+    difficulty(label) {
+      find(n => n.type === 'button' && n.props.children?.[0]?.props?.children === label).props.onClick(); render();
     },
     motion(value) { media.matches = value; listeners.forEach(fn => fn()); render(); },
     bar() {
@@ -151,8 +154,16 @@ test('boundary names are trimmed and stored for each mode; busy blocks submissio
 test('storage denial cannot break login, valid entry, or the control bar', async () => {
   const h = harness({ denied: true });
   h.input('  Ada  '); await h.submit();
-  assert.deepEqual(h.calls, [['open', 42]]);
+  assert.deepEqual(h.calls, [['open', 42, 'seeded', 'normal']]);
   assert.doesNotThrow(() => h.bar());
+});
+
+test('difficulty is selected before entry and passed to the deterministic shift request', async () => {
+  const h = harness({ name: 'Ada' });
+  h.difficulty('Hard');
+  await h.submit();
+  assert.deepEqual(h.calls, [['open', 42, 'seeded', 'hard']]);
+  assert.equal(h.values.get('plantops.difficulty'), 'hard');
 });
 
 test('reduced motion stops particles and parallax on mount and live changes', () => {

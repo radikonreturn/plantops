@@ -9,7 +9,14 @@ from .engine import ProductionLineSimulation, ShiftActionUnavailableError
 from .living import LivingShift
 from .tutorial import TUTORIAL_PROFILE, TUTORIAL_SEED, configure_tutorial, make_tutorial_scenario
 from .scenario import make_mvp_scenario
-from .profiles import CLASSIC_PROFILE, ShiftProfile, action_log, make_seeded_shift, profile_snapshot
+from .profiles import (
+    CLASSIC_PROFILE,
+    ShiftProfile,
+    action_log,
+    apply_difficulty,
+    make_seeded_shift,
+    profile_snapshot,
+)
 
 
 ALLOWED_SPEEDS = frozenset({1, 2, 4})
@@ -35,6 +42,7 @@ class SimulationSession:
     intervention_cost: float = 0.0
     preventive_maintenance_cost: float = 0.0
     profile: ShiftProfile = CLASSIC_PROFILE
+    difficulty: str = "normal"
 
     def __post_init__(self) -> None:
         if type(self.speed) is not int or self.speed not in ALLOWED_SPEEDS:
@@ -55,12 +63,15 @@ class SessionManager:
         failures_enabled: bool = True,
         speed: int = 1,
         scenario_mode: str = "classic",
+        difficulty: str = "normal",
     ) -> dict[str, Any]:
         self._validate_speed(speed)
         if scenario_mode not in {"classic", "seeded", "tutorial"}:
             raise ValueError("Scenario mode must be classic, seeded or tutorial")
         if scenario_mode == "tutorial" and not failures_enabled:
             raise ValueError("Tutorial requires equipment conditions enabled")
+        if difficulty not in {"easy", "normal", "hard"}:
+            raise ValueError("Difficulty must be easy, normal or hard")
         scenario = (
             make_mvp_scenario()
             if failures_enabled
@@ -69,17 +80,20 @@ class SessionManager:
         profile = CLASSIC_PROFILE
         if scenario_mode == "seeded":
             scenario, profile = make_seeded_shift(scenario, seed)
+            scenario, profile = apply_difficulty(scenario, profile, difficulty)
             if not failures_enabled:
                 scenario = replace(scenario, stages=tuple(
                     replace(stage, failure_probability=0) for stage in scenario.stages
                 ))
         if scenario_mode == "tutorial":
             scenario, profile, seed = make_tutorial_scenario(), TUTORIAL_PROFILE, TUTORIAL_SEED
+            difficulty = "easy"
         session = SimulationSession(
             session_id=str(uuid4()),
             simulation=ProductionLineSimulation(scenario, seed=seed),
             speed=speed,
             profile=profile,
+            difficulty=difficulty,
         )
         if scenario_mode == "seeded":
             session.simulation.living = LivingShift(session.simulation, profile.primary_zone or "cnc_01")
@@ -251,6 +265,7 @@ class SessionManager:
             "session_id": session.session_id,
             "paused": session.paused,
             "speed": session.speed,
+            "difficulty": session.difficulty,
             "intervention_cost": session.intervention_cost,
             "preventive_maintenance_cost": session.preventive_maintenance_cost,
             "summary": summary,

@@ -54,7 +54,7 @@ export default function App() {
   };
   if (!session) return <LoginScreen control={control} replay={replay} />;
   return <div className="app-shell" data-tutorial-step={step ?? undefined} data-workspace={view}><a className="skip-link" href="#workspace-content">{t("Skip to workspace")}</a>
-    <ControlBar control={control}/><div className="application-body"><LeftRail session={session} view={view} navigate={navigate}/>
+    <ControlBar control={control} onExit={control.returnToMenu}/><div className="application-body"><LeftRail session={session} view={view} navigate={navigate}/>
     <main id="workspace-content" className="workspace-content">
       <div className={`operation-feedback ${error ? "has-error" : ""}`} role={error ? "alert" : "status"}><span className="signal"/><span>{error ?? busy ?? notice}{error && " " + t("Playback held; use Reconnect before continuing.")}</span></div>
       {session ? <>
