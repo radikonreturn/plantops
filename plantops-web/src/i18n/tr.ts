@@ -1,6 +1,13 @@
 import type { TranslationKey } from "./en";
 
 export const tr = {
+  "Sound": "Ses",
+  "Mute": "Sessize al",
+  "Unmute": "Sesi aç",
+  "Master volume": "Genel ses",
+  "Ambience": "Ambiyans",
+  "Alerts": "Uyarılar",
+  "Sound starts after your first interaction": "Ses ilk etkileşimden sonra başlar",
   "Skip to workspace": "Çalışma alanına geç",
   "Playback held; use Reconnect before continuing.": "Oynatma bekletiliyor; devam etmeden önce Yeniden bağlan seçeneğini kullanın.",
   "Shift closed · outcome recorded": "Vardiya kapandı · sonuç kaydedildi",

@@ -1,5 +1,12 @@
 // English phrases are stable, typed message keys. Interpolation uses named placeholders.
 export const en = {
+  "Sound": "Sound",
+  "Mute": "Mute",
+  "Unmute": "Unmute",
+  "Master volume": "Master volume",
+  "Ambience": "Ambience",
+  "Alerts": "Alerts",
+  "Sound starts after your first interaction": "Sound starts after your first interaction",
   "Skip to workspace": "Skip to workspace",
   "Playback held; use Reconnect before continuing.": "Playback held; use Reconnect before continuing.",
   "Shift closed · outcome recorded": "Shift closed · outcome recorded",

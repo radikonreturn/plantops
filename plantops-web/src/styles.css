@@ -364,3 +364,15 @@ td strong { font-weight: 600; }
   background: transparent;
 }
 .language-selector option { color: #18232e; background: #fff; }
+
+.audio-controls { display: flex; align-items: center; gap: 4px; }
+.audio-controls > button { display: grid; place-items: center; background: var(--graphite-light); color: #f2f3eb; border-color: #768580; }
+.audio-settings { position: relative; }
+.audio-settings > summary { cursor: pointer; padding: 7px 5px; }
+.audio-settings > summary:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.audio-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; width: min(240px, calc(100vw - 24px)); padding: 16px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); }
+.audio-panel label { display: block; margin-bottom: 12px; }
+.audio-panel label:last-of-type { margin-bottom: 0; }
+.audio-panel label > span { display: flex; justify-content: space-between; gap: 12px; }
+.audio-panel input { width: 100%; accent-color: var(--blue); }
+.audio-panel p { margin: 12px 0 0; font-size: 12px; }

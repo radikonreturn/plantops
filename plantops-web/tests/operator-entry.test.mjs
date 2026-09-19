@@ -106,6 +106,7 @@ function harness({ name = '', saved = false, denied = false, reduced = false } =
     motion(value) { media.matches = value; listeners.forEach(fn => fn()); render(); },
     bar() {
       const { ControlBar } = load(barSource, {
+        '../audio/AudioControls': { AudioControls() {} },
         '../tutorial/state': policy, '../format': { clock: String, percent: String }, './Modal': { Modal() {} },
       });
       slots = []; cursor = 0;

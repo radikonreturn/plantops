@@ -1,3 +1,4 @@
+import { usePlantAudio } from "./audio/usePlantAudio";
 import { useEffect, useState } from "react";
 import { useI18n } from "./i18n";
 import { usePlantSession } from "./hooks/usePlantSession";
@@ -25,6 +26,7 @@ export default function App() {
   const { t } = useI18n();
   const control = usePlantSession();
   const {session, busy, error, notice} = control;
+  const audio = usePlantAudio(session, control.connectionHold);
   const [view, setView] = useState<Workspace>(viewFromHash);
   const [progress, setProgress] = useState(() => emptyProgress(""));
   const [selected, setSelected] = useState<string | null>(null);
@@ -54,7 +56,7 @@ export default function App() {
   };
   if (!session) return <LoginScreen control={control} replay={replay} />;
   return <div className="app-shell" data-tutorial-step={step ?? undefined} data-workspace={view}><a className="skip-link" href="#workspace-content">{t("Skip to workspace")}</a>
-    <ControlBar control={control} onExit={control.returnToMenu}/><div className="application-body"><LeftRail session={session} view={view} navigate={navigate}/>
+    <ControlBar audio={audio} control={control} onExit={control.returnToMenu}/><div className="application-body"><LeftRail session={session} view={view} navigate={navigate}/>
     <main id="workspace-content" className="workspace-content">
       <div className={`operation-feedback ${error ? "has-error" : ""}`} role={error ? "alert" : "status"}><span className="signal"/><span>{error ?? busy ?? notice}{error && " " + t("Playback held; use Reconnect before continuing.")}</span></div>
       {session ? <>
