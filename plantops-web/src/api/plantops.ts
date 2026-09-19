@@ -21,10 +21,17 @@ interface ErrorPayload {
 export class PlantOpsApiError extends Error {
   readonly status: number;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, readonly hasDetail = true) {
     super(message);
     this.name = "PlantOpsApiError";
     this.status = status;
+  }
+}
+
+export class PlantOpsConnectionError extends Error {
+  constructor(readonly path: string, readonly method: string) {
+    super(`Cannot reach PlantOps at ${API_BASE_URL} for ${method} ${path}. Check that dev:full is running.`);
+    this.name = "PlantOpsConnectionError";
   }
 }
 
@@ -51,9 +58,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...init?.headers,
     },
-  }).catch((error: unknown) => {
-    throw new Error(`Cannot reach PlantOps at ${API_BASE_URL} for ${init?.method ?? "GET"} ${path}. ` +
-      `Check that dev:full is running. ${error instanceof Error ? error.message : "Connection failed."}`);
+  }).catch(() => {
+    throw new PlantOpsConnectionError(path, init?.method ?? "GET");
   });
 
   if (!response.ok) {
@@ -66,6 +72,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new PlantOpsApiError(
       response.status,
       errorMessage(payload, response.status),
+      typeof payload?.detail === "string" || (Array.isArray(payload?.detail) && payload.detail.some(item => Boolean(item.msg))),
     );
   }
 

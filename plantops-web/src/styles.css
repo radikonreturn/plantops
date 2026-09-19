@@ -347,3 +347,16 @@ td strong { font-weight: 600; }
   .start-options { grid-template-columns: 1fr; gap: 12px; }
   .tutorial-coach { margin: 8px; padding: 12px; }
 }
+
+.language-selector {
+  width: auto;
+  min-width: 6.5rem;
+  padding: 4px 6px;
+  border: 1px solid #8a96a3;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  background: transparent;
+}
+.language-selector option { color: #18232e; background: #fff; }

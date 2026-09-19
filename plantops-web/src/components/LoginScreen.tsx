@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { LanguageSelector, useI18n } from "../i18n";
 import type { PlantSession } from "../hooks/usePlantSession";
 import { readStored, writeStored } from "../tutorial/state";
 import "../styles/login.css";
@@ -9,6 +10,7 @@ interface LoginScreenProps {
 }
 
 export function LoginScreen({ control, replay }: LoginScreenProps) {
+  const { t } = useI18n();
   const { busy, error, notice } = control;
   const hasSavedSession = Boolean(readStored("sessionStorage", "plantops.activeSession"));
 
@@ -18,7 +20,7 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
   const [mode, setMode] = useState<"open" | "tutorial" | "resume">(() => {
     return hasSavedSession ? "resume" : "open";
   });
-  const [nameError, setNameError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<"Enter a name between 2 and 24 characters." | null>(null);
   const [reducedMotion, setReducedMotion] = useState(() =>
     window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
@@ -178,7 +180,7 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
     <main
       className="login-viewport"
       onMouseMove={handleMouseMove}
-      aria-label="PlantOps Operations Login"
+      aria-label={t("PlantOps Operations Login")}
     >
       {/* 3D Rendered Industrial Props Backdrop with Subtle Parallax */}
       <div
@@ -197,44 +199,44 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
         <div className="topbar-group topbar-left">
           <span className="topbar-brand">PlantOps</span>
           <span className="topbar-divider" aria-hidden="true">|</span>
-          <span className="topbar-plant">PLANT 01</span>
+          <span className="topbar-plant">{t("PLANT 01")}</span>
           <span className="topbar-divider" aria-hidden="true">|</span>
           <div className="topbar-indicator">
             <span className="topbar-led pulsing" aria-hidden="true" />
-            <span>PRODUCTION ONLINE</span>
+            <span>{t("PRODUCTION ONLINE")}</span>
           </div>
         </div>
 
         <div className="topbar-group topbar-center">
           <span className="topbar-divider" aria-hidden="true">|</span>
-          <span className="topbar-stat">SHIFT B</span>
+          <span className="topbar-stat">{t("SHIFT B")}</span>
           <span className="topbar-divider" aria-hidden="true">|</span>
           <time className="topbar-clock">{dateStr}</time>
           <span className="topbar-divider" aria-hidden="true">|</span>
-          <span className="topbar-uptime">
-            UPTIME <strong>{upDays} {pad(upHours)}:{pad(upMins)}:{pad(upSecs)}</strong>
+          <span className="topbar-uptime">{" " + t("UPTIME") + " "}<strong>{upDays} {pad(upHours)}:{pad(upMins)}:{pad(upSecs)}</strong>
           </span>
         </div>
 
         <div className="topbar-group topbar-right">
+          <LanguageSelector />
           <div className="topbar-stat">
             <span className="topbar-led" aria-hidden="true" />
-            <span>CELLS 6/6</span>
+            <span>{t("CELLS 6/6")}</span>
           </div>
           <div className="topbar-stat">
             <span className="topbar-led" aria-hidden="true" />
-            <span>CONVEYORS 12/12</span>
+            <span>{t("CONVEYORS 12/12")}</span>
           </div>
           <div className="topbar-stat">
             <span className="topbar-led" aria-hidden="true" />
-            <span>ALARMS 0</span>
+            <span>{t("ALARMS 0")}</span>
           </div>
           <button
             type="button"
             className="topbar-fullscreen-btn"
             onClick={toggleFullscreen}
-            title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
-            aria-label="Toggle Fullscreen"
+            title={isFullscreen ? t("Exit Fullscreen") : t("Enter Fullscreen")}
+            aria-label={t("Toggle Fullscreen")}
           >
             <svg
               width="14"
@@ -278,21 +280,19 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
             </div>
             <div className="login-brand-meta">
               <h1 className="login-brand-title">PlantOps</h1>
-              <p className="login-brand-sub">PLAN · SIMULATE · OPERATE</p>
+              <p className="login-brand-sub">{t("PLAN · SIMULATE · OPERATE")}</p>
             </div>
           </div>
 
           <hr className="login-card-divider" />
 
           {/* Heading */}
-          <h2 className="login-card-heading">Start your shift</h2>
+          <h2 className="login-card-heading">{t("Start your shift")}</h2>
 
           {/* Form */}
           <form className="login-form" onSubmit={handleSubmit}>
             <div className="login-field-group">
-              <label htmlFor="operator-name-input" className="login-label">
-                Your name
-              </label>
+              <label htmlFor="operator-name-input" className="login-label">{t("Your name")}</label>
               <div className="login-input-wrap">
                 <svg
                   className="login-input-icon"
@@ -311,7 +311,7 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
                   id="operator-name-input"
                   type="text"
                   className="login-input"
-                  placeholder="Enter your name"
+                  placeholder={t("Enter your name")}
                   value={operatorName}
                   onChange={(e) => {
                     setOperatorName(e.target.value);
@@ -328,7 +328,7 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
 
             {nameError && (
               <p id="operator-name-error" className="login-status-msg error" role="alert">
-                {nameError}
+                {t(nameError)}
               </p>
             )}
 
@@ -346,10 +346,10 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
                 <>
                   <span>
                     {mode === "resume" && hasSavedSession
-                      ? "Resume Shift"
+                      ? t("Resume Shift")
                       : mode === "tutorial"
-                      ? "Start Guided Shift"
-                      : "Enter PlantOps"}
+                      ? t("Start Guided Shift")
+                      : t("Enter PlantOps")}
                   </span>
                   <svg
                     className="login-arrow-icon"
@@ -375,14 +375,12 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
                 className="login-mode-toggle"
                 onClick={() => setShowModes((v) => !v)}
               >
-                <span>
-                  Mode:{" "}
-                  <strong>
+                <span>{t("Mode:")}{" "}<strong>
                     {mode === "open"
-                      ? "Open simulation"
+                      ? t("Open simulation")
                       : mode === "tutorial"
-                      ? "Guided first shift"
-                      : "Resume saved shift"}
+                      ? t("Guided first shift")
+                      : t("Resume saved shift")}
                   </strong>
                 </span>
                 <span>{showModes ? "▲" : "▼"}</span>
@@ -394,24 +392,18 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
                     type="button"
                     className={`login-mode-pill ${mode === "open" ? "active" : ""}`}
                     onClick={() => setMode("open")}
-                  >
-                    Open shift
-                  </button>
+                  >{t("Open shift")}</button>
                   <button
                     type="button"
                     className={`login-mode-pill ${mode === "tutorial" ? "active" : ""}`}
                     onClick={() => setMode("tutorial")}
-                  >
-                    Guided tutorial
-                  </button>
+                  >{t("Guided tutorial")}</button>
                   {hasSavedSession && (
                     <button
                       type="button"
                       className={`login-mode-pill ${mode === "resume" ? "active" : ""}`}
                       onClick={() => setMode("resume")}
-                    >
-                      Resume saved
-                    </button>
+                    >{t("Resume saved")}</button>
                   )}
                 </div>
               )}
@@ -429,7 +421,7 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
           </form>
 
           {/* Plant Location & Footer */}
-          <div className="login-footer">Artemis Manufacturing · Plant 01</div>
+          <div className="login-footer">{t("Artemis Manufacturing · Plant 01")}</div>
         </div>
       </section>
     </main>

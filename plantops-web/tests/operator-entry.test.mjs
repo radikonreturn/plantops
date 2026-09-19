@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { typescriptLoader } from './load-ts.mjs';
+
+const i18n = typescriptLoader()('i18n/index.tsx');
 
 const read = path => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8');
 const loginSource = read('components/LoginScreen.tsx');
@@ -58,6 +61,7 @@ function harness({ name = '', saved = false, denied = false, reduced = false } =
       requestAnimationFrame: fn => { frames.set(++nextFrame, fn); return nextFrame; },
       cancelAnimationFrame: id => frames.delete(id),
       require: id => {
+        if (id === '../i18n') return { useI18n: () => i18n.createTranslator('en'), LanguageSelector: () => null };
         if (id === 'react') return react;
         if (id === 'react/jsx-runtime') return { jsx, jsxs: jsx };
         if (id.endsWith('.css')) return {};
@@ -94,7 +98,7 @@ function harness({ name = '', saved = false, denied = false, reduced = false } =
     submit: () => find(n => n.type === 'form').props.onSubmit({ preventDefault() {} }),
     mode(label) {
       find(n => n.props.className === 'login-mode-toggle').props.onClick(); render();
-      find(n => n.type === 'button' && n.props.children === label).props.onClick(); render();
+      find(n => n.type === 'button' && typeof n.props.children === 'string' && n.props.children.trim() === label).props.onClick(); render();
     },
     motion(value) { media.matches = value; listeners.forEach(fn => fn()); render(); },
     bar() {
