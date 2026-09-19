@@ -13,11 +13,15 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
   const hasSavedSession = Boolean(readStored("sessionStorage", "plantops.activeSession"));
 
   const [operatorName, setOperatorName] = useState(() => {
-    return localStorage.getItem("plantops.operatorName") ?? "";
+    return readStored("localStorage", "plantops.operatorName") ?? "";
   });
   const [mode, setMode] = useState<"open" | "tutorial" | "resume">(() => {
     return hasSavedSession ? "resume" : "open";
   });
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [reducedMotion, setReducedMotion] = useState(() =>
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
   const [showModes, setShowModes] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const [uptimeSeconds, setUptimeSeconds] = useState(120 * 3600 + 4 * 60 + 18);
@@ -42,10 +46,21 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
     return () => document.removeEventListener("fullscreenchange", handler);
   }, []);
 
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => {
+      setReducedMotion(media.matches);
+      if (media.matches) setMouseOffset({ x: 0, y: 0 });
+    };
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
   // Ambient floating particles canvas
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || reducedMotion) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
@@ -60,16 +75,16 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
     };
     window.addEventListener("resize", onResize);
 
-    const particleCount = 38;
-    const particles = Array.from({ length: particleCount }, () => ({
-      x: Math.random() * width,
-      y: Math.random() * height,
-      size: Math.random() * 1.8 + 0.6,
-      vx: (Math.random() - 0.5) * 0.25,
-      vy: (Math.random() - 0.5) * 0.25 - 0.1,
-      alpha: Math.random() * 0.45 + 0.15,
-      baseAlpha: Math.random() * 0.45 + 0.15,
-      phase: Math.random() * Math.PI * 2,
+    // Fixed index-based distribution keeps the same ambient appearance on every mount.
+    const particles = Array.from({ length: 38 }, (_, index) => ({
+      x: ((index * 17 + 3) % 101) / 101 * width,
+      y: ((index * 29 + 11) % 103) / 103 * height,
+      size: 0.6 + (index % 7) * 0.3,
+      vx: ((index % 5) - 2) * 0.05,
+      vy: ((index % 7) - 3) * 0.035 - 0.1,
+      alpha: 0.15 + (index % 10) * 0.045,
+      baseAlpha: 0.15 + (index % 10) * 0.045,
+      phase: index * Math.PI * 2 / 38,
     }));
 
     const render = () => {
@@ -97,11 +112,13 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
     return () => {
       window.removeEventListener("resize", onResize);
       cancelAnimationFrame(animId);
+      ctx.clearRect(0, 0, width, height);
     };
-  }, []);
+  }, [reducedMotion]);
 
   // Parallax on mouse movement
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (reducedMotion) return;
     const { clientX, clientY } = e;
     const cx = window.innerWidth / 2;
     const cy = window.innerHeight / 2;
@@ -126,8 +143,13 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
     e.preventDefault();
     if (busy) return;
 
-    const trimmed = operatorName.trim() || "Shift Operator";
-    localStorage.setItem("plantops.operatorName", trimmed);
+    const trimmed = operatorName.trim();
+    if (trimmed.length < 2 || trimmed.length > 24) {
+      setNameError("Enter a name between 2 and 24 characters.");
+      return;
+    }
+    setNameError(null);
+    setOperatorName(trimmed);
     writeStored("localStorage", "plantops.operatorName", trimmed);
 
     if (mode === "tutorial") {
@@ -291,12 +313,24 @@ export function LoginScreen({ control, replay }: LoginScreenProps) {
                   className="login-input"
                   placeholder="Enter your name"
                   value={operatorName}
-                  onChange={(e) => setOperatorName(e.target.value)}
+                  onChange={(e) => {
+                    setOperatorName(e.target.value);
+                    setNameError(null);
+                  }}
+                  required
+                  aria-invalid={Boolean(nameError)}
+                  aria-describedby={nameError ? "operator-name-error" : undefined}
                   autoComplete="name"
                   autoFocus
                 />
               </div>
             </div>
+
+            {nameError && (
+              <p id="operator-name-error" className="login-status-msg error" role="alert">
+                {nameError}
+              </p>
+            )}
 
             <button
               type="submit"

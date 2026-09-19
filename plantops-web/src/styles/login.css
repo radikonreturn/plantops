@@ -512,3 +512,12 @@
     padding: 26px 20px 22px;
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .login-viewport *,
+  .login-viewport *::before,
+  .login-viewport *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

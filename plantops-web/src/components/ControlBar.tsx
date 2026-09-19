@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { PlantSession } from "../hooks/usePlantSession";
 import { clock, percent } from "../format";
+import { readStored } from "../tutorial/state";
 import { Modal } from "./Modal";
 export function ControlBar({control}: {control: PlantSession}) {
   const {session, busy} = control;
@@ -9,7 +10,7 @@ export function ControlBar({control}: {control: PlantSession}) {
   const s = session?.summary;
   const ended = !!s && s.simulated_minutes >= s.shift_minutes;
   const paused = !session || session.paused || control.connectionHold;
-  const opName = localStorage.getItem("plantops.operatorName");
+  const opName = readStored("localStorage", "plantops.operatorName");
   return <>
     <header className="app-header">
       <div className="brand"><svg viewBox="0 0 30 30" aria-hidden="true"><path d="M3 26V12l8-5v7l8-5v7h8v10ZM5 5h4v5M8 20h3m5 0h3m4 0h2" /></svg><strong>PlantOps</strong></div>
