@@ -4,8 +4,8 @@ import { tr } from "./tr";
 
 export type Locale = "en" | "tr";
 export type Values = Record<string, string | number | null | undefined>;
-export interface Message { key: TranslationKey; values?: Values }
-export const message = (key: TranslationKey, values?: Values): Message => ({ key, values });
+export interface Message { key: string; values?: Values }
+export const message = (key: string, values?: Values): Message => ({ key, values });
 export const isLocale = (value: unknown): value is Locale => value === "en" || value === "tr";
 export const readLocale = (): Locale => {
   const saved = readStored("localStorage", "plantops.locale");
@@ -15,9 +15,9 @@ export function persistLocale(locale: Locale): void {
   writeStored("localStorage", "plantops.locale", locale);
 }
 
-export function translate(locale: Locale, key: TranslationKey, values: Values = {}): string {
+export function translate(locale: Locale, key: string, values: Values = {}): string {
   const template = Object.prototype.hasOwnProperty.call(en, key)
-    ? (locale === "tr" ? tr[key] : en[key]) ?? en[key]
+    ? (locale === "tr" ? tr[key as TranslationKey] : en[key as TranslationKey]) ?? en[key as TranslationKey]
     : key;
   return template.replace(/\{(\w+)\}/g, (placeholder, name: string) =>
     Object.prototype.hasOwnProperty.call(values, name) ? String(values[name] ?? "") : placeholder

@@ -1,11 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { persistLocale, readLocale, statusLabel, translate, type Locale, type Values } from "./core";
-import type { TranslationKey } from "./en";
 
 export function createTranslator(locale: Locale) {
   return {
     locale,
-    t: (key: TranslationKey, values?: Values) => translate(locale, key, values),
+    t: (key: string, values?: Values) => translate(locale, key, values),
     label: (value: string) => statusLabel(locale, value),
     money: (value: number) => value.toLocaleString(locale === "tr" ? "tr-TR" : "en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     percent: (value: number | null) => value === null ? "—" : new Intl.NumberFormat(locale === "tr" ? "tr-TR" : "en-US", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value),

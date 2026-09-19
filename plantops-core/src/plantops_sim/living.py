@@ -136,7 +136,11 @@ class LivingShift:
         if kind == "SHIFT_EVENT_START" and event.state == "scheduled":
             self.start_decision(event)
         elif kind == "SHIFT_DECISION_DEADLINE" and event.state == "active" and event.choices:
-            self.apply_decision(event, None)
+            if event.kind != "supplier_delay":
+                self.apply_decision(event, None)
+        elif kind == "SHIFT_EVENT_END" and event.state == "active":
+            if event.kind != "supplier_delay":
+                self.finish(event, "expired")
         self.reconcile()
 
     def finish(self, event: ShiftEvent, state: Literal["resolved", "expired"]) -> None:
@@ -157,13 +161,26 @@ class LivingShift:
         for event in self.events.values():
             if event.state != "active":
                 continue
+            if event.kind == "condition_risk" and event.zone in sim.machines and sim.machines[event.zone].health >= 99:
+                self.finish(event, "resolved")
+                event.outcome = "Service restored machine health and reduced exposure."
+                continue
+            if event.kind == "supplier_delay" and sim.clock >= self.end_minute:
+                if event.affected_ids and all(sim.purchase_orders[i].status != "OPEN" for i in event.affected_ids if i in sim.purchase_orders):
+                    self.finish(event, "resolved")
+                else:
+                    self.finish(event, "expired")
+                continue
             if event.choices or event.kind == "management_objective":
                 if sim.clock >= self.end_minute and event.kind == "management_objective":
                     self.finish(event, "resolved")
                     event.outcome = "Objective reviewed against actual shift results."
                 continue
             if sim.clock >= self.end_minute:
-                self.finish(event, "expired")
+                if event.kind == "supplier_delay" and event.affected_ids and all(sim.purchase_orders[i].status != "OPEN" for i in event.affected_ids if i in sim.purchase_orders):
+                    self.finish(event, "resolved")
+                else:
+                    self.finish(event, "expired")
 
     def cycle_minutes(self, machine_id: str, unit_id: int, cycle: float) -> float:
         for event in self.events.values():
@@ -223,14 +240,14 @@ class LivingShift:
         """Use only the existing dedicated schedule stream; bind live targets at start."""
         sim = self.simulation
         rng = sim.rng.get("shift-events:v1")
-        count, window, pressure = {"easy": (3, 45, .7), "normal": (4, 30, 1.0), "hard": (6, 18, 1.4)}[self.difficulty]
-        primary_family = {"raw": "supplier_delay", "dispatch": "customer_escalation", "quality_01": "quality_notice", "assembly_01": "operator_shortage"}.get(primary_zone, "condition_risk")
+        count, window, pressure = {"easy": (3, 45, .7), "normal": (3, 30, 1.0), "hard": (6, 18, 1.4)}[self.difficulty]
+        primary_family = {"raw": "supplier_delay", "dispatch": "customer_escalation", "quality_01": "quality_notice"}.get(primary_zone, "condition_risk")
         families = ["supplier_delay", "customer_escalation", "operator_shortage", "condition_risk", "quality_notice", "energy_window"]
         candidates = [k for k in families if k != primary_family]
         # A different equipment target complements a machine-led handover on hard shifts.
         if count > len(candidates):
             candidates.append(primary_family)
-        kinds = rng.sample(candidates, count)
+        kinds = [primary_family] + rng.sample([k for k in candidates if k != primary_family], count - 1)
         if rng.random() < .65:
             kinds[-1] = "management_objective"
         machine_ids = [mid for mid in sim.machines if mid not in {primary_zone, "quality_01"}]
@@ -311,6 +328,8 @@ class LivingShift:
 
     def choice_unavailable(self, event: ShiftEvent, choice_id: str) -> str | None:
         sim = self.simulation
+        if event.state == "scheduled":
+            return None
         if event.state != "active" or sim.clock >= event.deadline_minute or sim.clock >= self.end_minute:
             return "Decision window is closed."
         if choice_id == "service":
